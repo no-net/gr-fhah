@@ -136,9 +136,9 @@ add_custom_target(uninstall
 ########################################################################
 # Add subdirectories
 ########################################################################
-add_subdirectory(include/fhah)
-add_subdirectory(lib)
-add_subdirectory(swig)
+#add_subdirectory(include/fhah)
+#add_subdirectory(lib)
+#add_subdirectory(swig)
 add_subdirectory(python)
 add_subdirectory(grc)
 add_subdirectory(apps)
