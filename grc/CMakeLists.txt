@@ -18,5 +18,6 @@
 # Boston, MA 02110-1301, USA.
 
 install(FILES
-    DESTINATION share/gnuradio/grc/blocks
+    fhah_fhah_engine_tx.xml
+    fhah_fhah_engine_rx.xml DESTINATION share/gnuradio/grc/blocks
 )

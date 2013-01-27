@@ -45,6 +45,8 @@ if _RTLD_GLOBAL != 0:
 from fhah_swig import *
 
 # import any pure python here
+from fhah_engine_tx import *
+from fhah_engine_rx import *
 #
 
 # ----------------------------------------------------------------
