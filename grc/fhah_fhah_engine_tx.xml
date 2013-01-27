@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<block>
+  <name>fhah_engine_tx</name>
+  <key>fhah_fhah_engine_tx</key>
+  <category>fhah</category>
+  <import>import fhah</import>
+  <make>fhah.fhah_engine_tx(hop_terval, pre_guard, post_guard, addr, link_speed, freq_list)</make>
+  <!-- Make one 'param' node for every Parameter you want settable from the GUI.
+       Sub-nodes:
+       * name
+       * key (makes the value accessible as $keyname, e.g. in the make node)
+       * type -->
+  <param>
+    <name>...</name>
+    <key>...</key>
+    <type>...</type>
+  </param>
+
+  <!-- Make one 'sink' node per input. Sub-nodes:
+       * name (an identifier for the GUI)
+       * type
+       * vlen
+       * optional (set to 1 for optional inputs) -->
+  <sink>
+    <name>in</name>
+    <type><!-- e.g. int, real, complex, byte, short, xxx_vector, ...--></type>
+  </sink>
+
+  <!-- Make one 'source' node per output. Sub-nodes:
+       * name (an identifier for the GUI)
+       * type
+       * vlen
+       * optional (set to 1 for optional inputs) -->
+  <source>
+    <name>out</name>
+    <type><!-- e.g. int, real, complex, byte, short, xxx_vector, ...--></type>
+  </source>
+</block>
