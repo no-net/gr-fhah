@@ -2,7 +2,7 @@
 <block>
   <name>Frequency-Hopping Ad-Hoc Rx</name>
   <key>fhah_fhah_engine_rx</key>
-  <category>fhah</category>
+  <category>FH Ad-Hoc</category>
   <import>import fhah</import>
   <make>fhah.fhah_engine_rx($hop_interval, $pre_guard, $post_guard, $addr, $link_speed, $freq_list)</make>
     <param>
