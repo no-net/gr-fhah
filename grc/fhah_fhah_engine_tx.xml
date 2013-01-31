@@ -11,6 +11,11 @@
         <type>real</type>
     </param>
     <param>
+        <name>Device Address</name>
+        <key>addr</key>
+        <type>real</type>
+    </param>
+    <param>
         <name>Post Guard(s)</name>
         <key>post_guard</key>
         <type>real</type>

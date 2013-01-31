@@ -126,10 +126,12 @@ class fhah_engine_tx(gr.block):
                       pmt.pmt_string_to_symbol('usrp_sink.set_command_time'),
                       pmt.from_python(((self.interval_start, ), {})),
                       pmt.pmt_string_to_symbol('fhss'))
+        #print "NEXT USRP CMD: %s" % self.interval_start
         self.post_msg(CTRL_PORT,
                       pmt.pmt_string_to_symbol('usrp_sink.set_center_freq'),
-                      pmt.from_python((self.tx_freq_list[self.hop_index], ), {}),
+                      pmt.from_python(((self.tx_freq_list[self.hop_index], ), {})),  # (( , ), {})),
                       pmt.pmt_string_to_symbol('fhss'))
+        #print "----> NEXT CMD: %s" % self.tx_freq_list[self.hop_index]
         self.post_msg(CTRL_PORT,
                       pmt.pmt_string_to_symbol('usrp_sink.clear_command_time'),
                       pmt.from_python(((0, ),
@@ -169,6 +171,7 @@ class fhah_engine_tx(gr.block):
         if frame_count == 0:
             data = numpy.concatenate([HAS_NO_DATA, self.pad_data])
             more_frames = 0
+            #print "SEND: %s" % data
             tx_object = time_object, data, more_frames
             self.post_msg(TO_FRAMER_PORT,
                           pmt.pmt_string_to_symbol('full'),
@@ -182,6 +185,7 @@ class fhah_engine_tx(gr.block):
             more_frames = frame_count - 1
             msg = self.tx_queue.get()
             data = numpy.concatenate([HAS_DATA, pmt.pmt_blob_data(msg.value)])
+            #print "DATA-SEND: %s" % data
             tx_object = time_object, data, more_frames
             self.post_msg(TO_FRAMER_PORT,
                           pmt.pmt_string_to_symbol('full'),
@@ -212,9 +216,9 @@ class fhah_engine_tx(gr.block):
         if self.rx_state == RX_INIT:
             self.post_msg(CTRL_PORT,
                           pmt.pmt_string_to_symbol('usrp_source.set_center_freq'),
-                          pmt.from_python((self.rx_freq_list[self.rx_hop_index], ),
-                                          {}),
+                          pmt.from_python((self.rx_freq_list[self.rx_hop_index], ), {}),
                           pmt.pmt_string_to_symbol('fhss'))
+            print 'Initialized to channel %s.  Searching...' % self.rx_hop_index
             self.rx_state == RX_SEARCH
 
         #check for msg inputs when work function is called
@@ -230,27 +234,29 @@ class fhah_engine_tx(gr.block):
             else:
                 pass  # CONTROL port
 
-        #process streaming samples and tags here
         #in0 = input_items[0]
         nread = self.nitems_read(0)  # number of items read on port 0
         ninput_items = len(input_items[0])
 
-        #read all tags associated with port 0 for items in this work function
-        tags = self.get_tags_in_range(0, nread, nread + ninput_items)
+        if not self.know_time:  # TODO: Move this to next IF!
+            #process streaming samples and tags here
 
-        #lets find all of our tags, making the appropriate adjustments to our
-        #timing
-        for tag in tags:
-            key_string = pmt.pmt_symbol_to_string(tag.key)
-            if key_string == "rx_time":
-                self.samples_since_last_rx_time = 0
-                self.current_integer, self.current_fractional = pmt.to_python(tag.value)
-                self.time_update = self.current_integer + self.current_fractional
-                self.found_time = True
-            elif key_string == "rx_rate":
-                self.rate = pmt.to_python(tag.value)
-                self.sample_period = 1 / self.rate
-                self.found_rate = True
+            #read all tags associated with port 0 for items in this work function
+            tags = self.get_tags_in_range(0, nread, nread + ninput_items)
+
+            #lets find all of our tags, making the appropriate adjustments to our
+            #timing
+            for tag in tags:
+                key_string = pmt.pmt_symbol_to_string(tag.key)
+                if key_string == "rx_time":
+                    self.samples_since_last_rx_time = 0
+                    self.current_integer, self.current_fractional = pmt.to_python(tag.value)
+                    self.time_update = self.current_integer + self.current_fractional
+                    self.found_time = True
+                elif key_string == "rx_rate":
+                    self.rate = pmt.to_python(tag.value)
+                    self.sample_period = 1 / self.rate
+                    self.found_rate = True
 
         #determine first transmit slot when we learn the time
         if not self.know_time:
@@ -262,8 +268,8 @@ class fhah_engine_tx(gr.block):
                 #frame_count = math.floor(self.time_update / self.frame_period)
                 #current_slot_interval = ( self.time_update % self.frame_period ) / self.frame_period
                 #self.time_transmit_start = (frame_count + 2) * self.frame_period + ( my_fraction_frame * self.frame_period ) - self.lead_limit
-                self.time_transmit_start = self.time_update + (self.lead_limit * 10.0)
-                self.interval_start = self.time_transmit_start + self.lead_limit
+                self.time_transmit_start = self.time_update + (self.post_guard * 10.0)  # TODO: ser pre_guard time!
+                self.interval_start = self.time_transmit_start + self.post_guard
 
         #get current time
         self.time_update += (self.sample_period * ninput_items)
@@ -271,9 +277,9 @@ class fhah_engine_tx(gr.block):
         #determine if it's time for us to start tx'ing, start process self.lead_limit seconds
         #before our slot actually begins (i.e. deal with latency)
         if self.time_update > self.time_transmit_start:
-            self.antenna_start = self.interval_start + self.post_guard
+            self.antenna_start = self.interval_start + self.pre_guard
             self.tx_frames()   # do more than this?
             self.interval_start += self.hop_interval
-            self.time_transmit_start = self.interval_start - self.lead_limit
+            self.time_transmit_start = self.interval_start - self.post_guard
 
         return ninput_items

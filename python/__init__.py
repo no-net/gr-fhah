@@ -42,7 +42,7 @@ if _RTLD_GLOBAL != 0:
 
 
 # import swig generated symbols into the fhah namespace
-from fhah_swig import *
+#from fhah_swig import *
 
 # import any pure python here
 from fhah_engine_tx import *

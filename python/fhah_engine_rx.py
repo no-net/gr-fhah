@@ -56,12 +56,12 @@ class fhah_engine_rx(gr.block):
     """
     def __init__(self, hop_interval, pre_guard, post_guard, addr, link_speed,
                  freq_list):
-        gr.gr.block.__init__(self,
-                             name="fhah_engine_rx",
-                             in_sig=[numpy.complex64],
-                             out_sig=None,
-                             num_msg_inputs=2,
-                             num_msg_outputs=2)
+        gr.block.__init__(self,
+                          name="fhah_engine_rx",
+                          in_sig=[numpy.complex64],
+                          out_sig=None,
+                          num_msg_inputs=2,
+                          num_msg_outputs=2)
 
         self.mgr = pmt.pmt_mgr()
         for i in range(64):
@@ -104,10 +104,10 @@ class fhah_engine_rx(gr.block):
             self.rx_state = RX_SEARCH
             self.post_msg(CTRL_PORT,
                           pmt.pmt_string_to_symbol('usrp_source.set_center_freq'),
-                          pmt.from_python((self.rx_freq_list[self.rx_hop_index], ), {}),
+                          pmt.from_python(((self.rx_freq_list[self.rx_hop_index], ), {})),
                           pmt.pmt_string_to_symbol('fhss'))
+            print 'Initialized to channel %s. Searching...' % self.rx_hop_index
             self.rx_hop_index = (self.rx_hop_index + 1) % self.rx_freq_list_length
-            print 'Initialized to channel 0.  Searching...'
 
         #check for msg inputs when work function is called
         if self.check_msg_queue():
@@ -117,6 +117,7 @@ class fhah_engine_rx(gr.block):
                 return -1
 
             if msg.offset == INCOMING_PKT_PORT:
+                #print "MSG RECEIVED"
                 pkt = pmt.pmt_blob_data(msg.value)
                 if pkt[0]:
                     blob = self.mgr.acquire(True)  # block
@@ -131,7 +132,7 @@ class fhah_engine_rx(gr.block):
                         self.rx_state = RX_FOUND
                         self.pkt_received = True
                         self.next_tune_time = self.time_update + self.hop_interval - self.tune_lead
-                        self.start_hop = self.next_tune_time - self.lead_limit
+                        self.start_hop = self.next_tune_time - self.pre_guard
                         print 'Received packet.  Locked.  Hopping initialized.'
                     else:
                         self.pkt_received = True
@@ -165,6 +166,7 @@ class fhah_engine_rx(gr.block):
         if not self.know_time:
             if self.found_time and self.found_rate:
                 self.know_time = True
+                print "know time!"
 
         #get current time
         self.time_update += (self.sample_period * ninput_items)
@@ -174,19 +176,19 @@ class fhah_engine_rx(gr.block):
                 #print 'set: ', self.rx_freq_list[self.rx_hop_index], self.time_update, self.next_tune_time
                 self.post_msg(CTRL_PORT,
                               pmt.pmt_string_to_symbol('usrp_source.set_command_time'),
-                              pmt.from_python((self.next_tune_time, ), {}),
+                              pmt.from_python((self.next_tune_time, )),
                               pmt.pmt_string_to_symbol('fhss'))
                 self.post_msg(CTRL_PORT,
                               pmt.pmt_string_to_symbol('usrp_source.set_center_freq'),
-                              pmt.from_python((self.rx_freq_list[self.rx_hop_index], ), {}),
+                              pmt.from_python(((self.rx_freq_list[self.rx_hop_index], ), {})),
                               pmt.pmt_string_to_symbol('fhss'))
                 self.post_msg(CTRL_PORT,
                               pmt.pmt_string_to_symbol('usrp_source.clear_command_time'),
-                              pmt.from_python((0, ), {}),
+                              pmt.from_python((0, )),
                               pmt.pmt_string_to_symbol('fhss'))
                 self.rx_hop_index = (self.rx_hop_index + 1) % self.rx_freq_list_length
                 self.start_hop += self.hop_interval
-                self.next_tune_time += self.hop_interval
+                self.next_tune_time = self.start_hop - self.pre_guard
                 #self.next_rx_interval += self.hop_interval - self.tune_lead
                 if self.pkt_received:
                     self.consecutive_miss = 0
