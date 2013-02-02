@@ -19,6 +19,7 @@
 #
 
 import numpy
+import random
 from gnuradio import gr
 from gruel import pmt
 #import gnuradio.extras  # brings in gr.block
@@ -111,16 +112,19 @@ class fhah_engine_tx(gr.block):
         self.rx_hop_index = 0
         self.consecutive_miss = 0
 
-    def tx_frames(self):
+        self.got_cts = False
+        self.max_sense_time = 5  # max sense time in ms
+
+    def hop(self):
+        """
+        Hop to next slot in frequency list.
+        """
         #send_sob
         #self.post_msg(TO_FRAMER_PORT,
         #              pmt.pmt_string_to_symbol('tx_sob'),
         #              pmt.PMT_T, pmt.pmt_string_to_symbol('tx_sob')
         #              )
 
-        #get all of the packets we want to send
-        total_byte_count = 0
-        frame_count = 0
         #a = pmt.from_python(((self.tx_freq_list[self.hop_index], ), {}))
         self.post_msg(CTRL_PORT,
                       pmt.pmt_string_to_symbol('usrp_sink.set_command_time'),
@@ -139,6 +143,25 @@ class fhah_engine_tx(gr.block):
                       pmt.pmt_string_to_symbol('fhss'))
         self.hop_index = (self.hop_index + 1) % self.tx_freq_list_length
         #print self.hop_index,self.interval_start
+
+    def get_cts(self):
+        """
+        Send RTS after random amount of time and wait for CTS.
+        """
+        # Wait random amount of time between 0 and max_sense_time ms.
+        random.uniform(0, self.max_sense_time)
+
+        # Sense for carrier
+
+        # Start transmission if no carrier sensed
+
+    def tx_frames(self):
+        """
+        Send data.
+        """
+        #get all of the packets we want to send
+        total_byte_count = 0
+        frame_count = 0
 
         #put residue from previous execution
         if self.has_old_msg:
@@ -168,6 +191,7 @@ class fhah_engine_tx(gr.block):
 
         #if no data, send a single pad frame
         #TODO: add useful pad data, i.e. current time of SDR
+        #TODO: SET beacon with variable interval!
         if frame_count == 0:
             data = numpy.concatenate([HAS_NO_DATA, self.pad_data])
             more_frames = 0
@@ -278,7 +302,18 @@ class fhah_engine_tx(gr.block):
         #before our slot actually begins (i.e. deal with latency)
         if self.time_update > self.time_transmit_start:
             self.antenna_start = self.interval_start + self.pre_guard
-            self.tx_frames()   # do more than this?
+            self.hop()
+            #TODO: if slot == next_beacon_slot:
+            #   self.send_beacon() -> wie get_cts (mit sensing)
+            #       --> setzt next_beacon_slot eins/zufaellig hoeher wenn Kanal
+            #       belegt!
+            if self.got_cts:  # ACHTUNG: got_cts abh. von dest.addr! -> got_cts[dest]
+                #               ---> Pakete muessen in unterschiedl queues
+                #               abgearbeitet werden ODER strikt wie Pakete
+                #               ankommen -> besser was max. Latenzen angeht!
+                self.tx_frames()   # do more than this?
+            else:
+                self.get_cts()
             self.interval_start += self.hop_interval
             self.time_transmit_start = self.interval_start - self.post_guard
 
