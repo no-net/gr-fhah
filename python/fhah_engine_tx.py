@@ -113,7 +113,7 @@ class fhah_engine_tx(gr.block):
         self.consecutive_miss = 0
 
         self.got_cts = False
-        self.max_sense_time = 5  # max sensing time in ms
+        self.max_sense_time = 0.005  # max sensing time in s
 
         self.hops_to_beacon = 10
         self.diff_last_beacon = 0
@@ -153,8 +153,12 @@ class fhah_engine_tx(gr.block):
         """
         Send RTS after random amount of time and wait for CTS.
         """
-        # Wait random amount of time between 0 and max_sense_time ms.
+        # Wait random amount of time between 0 and max_sense_time s.
         random.uniform(0, self.max_sense_time)
+        # TODO: Set self.time_transmit_start to new random time while sensing
+        # for a carrier -> set sensing-flag, so that the fg won't start to
+        # transmit within this time. Release flag on second call.
+        # TODO: Checke nur kurz vor senden!
 
         # Sense for carrier
 
@@ -167,8 +171,10 @@ class fhah_engine_tx(gr.block):
         """
         # Randomly set no of hops to next beacon (add diff from last beacon, so
         # that send only one beacon in mac_hops_to_beacon!)
-        self.hops_to_beacon = self.diff_last_beacon + random.randint(0, self.max_hops_to_beacon)
-        self.diff_last_beacon = self.max_hops_to_beacon - self.hops_to_beacon
+        beacon_slot = random.randint(0, self.max_hops_to_beacon)
+        self.hops_to_beacon = self.diff_last_beacon + beacon_slot
+        self.diff_last_beacon = self.max_hops_to_beacon - beacon_slot
+        #print self.diff_last_beacon
 
         time_object = int(math.floor(self.antenna_start)), (self.antenna_start % 1)
         print "Beacon sent at: ", time_object
@@ -328,6 +334,7 @@ class fhah_engine_tx(gr.block):
         if self.time_update > self.time_transmit_start:
             self.antenna_start = self.interval_start + self.pre_guard
             self.hop()
+            #print self.hops_to_beacon
             if self.hops_to_beacon == 0:
                 self.tx_beacon()
             else:
