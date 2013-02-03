@@ -113,7 +113,12 @@ class fhah_engine_tx(gr.block):
         self.consecutive_miss = 0
 
         self.got_cts = False
-        self.max_sense_time = 5  # max sense time in ms
+        self.max_sense_time = 5  # max sensing time in ms
+
+        self.hops_to_beacon = 10
+        self.diff_last_beacon = 0
+        self.max_hops_to_beacon = 80
+        self.beacon_msg = numpy.ones((1, 5), dtype='uint8')[0]
 
     def hop(self):
         """
@@ -154,10 +159,32 @@ class fhah_engine_tx(gr.block):
         # Sense for carrier
 
         # Start transmission if no carrier sensed
+        # Create RTS msg and call transmit, wait for CTS
 
-    def tx_frames(self):
+    def tx_beacon(self):
         """
-        Send data.
+        Send at least one beacon in max_hops_to_beacon.
+        """
+        # Randomly set no of hops to next beacon (add diff from last beacon, so
+        # that send only one beacon in mac_hops_to_beacon!)
+        self.hops_to_beacon = self.diff_last_beacon + random.randint(0, self.max_hops_to_beacon)
+        self.diff_last_beacon = self.max_hops_to_beacon - self.hops_to_beacon
+
+        time_object = int(math.floor(self.antenna_start)), (self.antenna_start % 1)
+        print "Beacon sent at: ", time_object
+
+        # Create msg and add to tx_queue before calling transmit
+        data = numpy.concatenate([HAS_NO_DATA, self.beacon_msg])
+        more_frames = 0
+        tx_object = time_object, data, more_frames
+        self.post_msg(TO_FRAMER_PORT,
+                      pmt.pmt_string_to_symbol('full'),
+                      pmt.from_python(tx_object),
+                      pmt.pmt_string_to_symbol('tdma'))
+
+    def tx_data(self):
+        """
+        Put messages from input into tx_queue.
         """
         #get all of the packets we want to send
         total_byte_count = 0
@@ -187,51 +214,49 @@ class fhah_engine_tx(gr.block):
                 self.tx_queue.put(msg)
                 frame_count += 1
 
-        time_object = int(math.floor(self.antenna_start)), (self.antenna_start % 1)
+        if frame_count > 0:
+            self.transmit(True, frame_count)
 
-        #if no data, send a single pad frame
-        #TODO: add useful pad data, i.e. current time of SDR
-        #TODO: SET beacon with variable interval!
-        if frame_count == 0:
-            data = numpy.concatenate([HAS_NO_DATA, self.pad_data])
-            more_frames = 0
-            #print "SEND: %s" % data
-            tx_object = time_object, data, more_frames
-            self.post_msg(TO_FRAMER_PORT,
-                          pmt.pmt_string_to_symbol('full'),
-                          pmt.from_python(tx_object),
-                          pmt.pmt_string_to_symbol('tdma'))
-        else:
-            #print frame_count,self.queue.qsize(), self.tx_queue.qsize()
-            #send first frame w tuple for tx_time and number of frames to put
-            #in slot
-            blob = self.mgr.acquire(True)  # block
-            more_frames = frame_count - 1
-            msg = self.tx_queue.get()
+    def transmit(self, is_data, frame_count):
+        """
+        Send Frames from tx_queue to Packet framer.
+        """
+        time_object = int(math.floor(self.antenna_start)), (self.antenna_start % 1)
+        print time_object
+
+        #print frame_count,self.queue.qsize(), self.tx_queue.qsize()
+        #send first frame w tuple for tx_time and number of frames to put
+        #in slot
+        blob = self.mgr.acquire(True)  # block
+        more_frames = frame_count - 1
+        msg = self.tx_queue.get()
+        if is_data:
             data = numpy.concatenate([HAS_DATA, pmt.pmt_blob_data(msg.value)])
-            #print "DATA-SEND: %s" % data
-            tx_object = time_object, data, more_frames
+        else:
+            data = numpy.concatenate([HAS_NO_DATA, self.pad_data])
+        #print "DATA-SEND: %s" % data
+        tx_object = time_object, data, more_frames
+        self.post_msg(TO_FRAMER_PORT,
+                      pmt.pmt_string_to_symbol('full'),
+                      pmt.from_python(tx_object),
+                      pmt.pmt_string_to_symbol('tdma'))
+        frame_count -= 1
+
+        #old_data = []
+        #print 'frame count: ',frame_count
+        #send remining frames, blob only
+        while(frame_count > 0):
+            msg = self.tx_queue.get()
+            data = numpy.concatenate([HAS_DATA,
+                                     pmt.pmt_blob_data(msg.value)])
+            blob = self.mgr.acquire(True)  # block
+            pmt.pmt_blob_resize(blob, len(data))
+            pmt.pmt_blob_rw_data(blob)[:] = data
             self.post_msg(TO_FRAMER_PORT,
-                          pmt.pmt_string_to_symbol('full'),
-                          pmt.from_python(tx_object),
+                          pmt.pmt_string_to_symbol('d_only'),
+                          blob,
                           pmt.pmt_string_to_symbol('tdma'))
             frame_count -= 1
-
-            #old_data = []
-            #print 'frame count: ',frame_count
-            #send remining frames, blob only
-            while(frame_count > 0):
-                msg = self.tx_queue.get()
-                data = numpy.concatenate([HAS_DATA,
-                                          pmt.pmt_blob_data(msg.value)])
-                blob = self.mgr.acquire(True)  # block
-                pmt.pmt_blob_resize(blob, len(data))
-                pmt.pmt_blob_rw_data(blob)[:] = data
-                self.post_msg(TO_FRAMER_PORT,
-                              pmt.pmt_string_to_symbol('d_only'),
-                              blob,
-                              pmt.pmt_string_to_symbol('tdma'))
-                frame_count -= 1
 
         #print total_byte_count
 
@@ -303,18 +328,21 @@ class fhah_engine_tx(gr.block):
         if self.time_update > self.time_transmit_start:
             self.antenna_start = self.interval_start + self.pre_guard
             self.hop()
-            #TODO: if slot == next_beacon_slot:
+            if self.hops_to_beacon == 0:
+                self.tx_beacon()
+            else:
             #   self.send_beacon() -> wie get_cts (mit sensing)
             #       --> setzt next_beacon_slot eins/zufaellig hoeher wenn Kanal
             #       belegt!
-            if self.got_cts:  # ACHTUNG: got_cts abh. von dest.addr! -> got_cts[dest]
+                if self.got_cts:  # ACHTUNG: got_cts abh. von dest.addr! -> got_cts[dest]
                 #               ---> Pakete muessen in unterschiedl queues
                 #               abgearbeitet werden ODER strikt wie Pakete
                 #               ankommen -> besser was max. Latenzen angeht!
-                self.tx_frames()   # do more than this?
-            else:
-                self.get_cts()
+                    self.tx_data()   # do more than this?
+                else:
+                    self.get_cts()
             self.interval_start += self.hop_interval
             self.time_transmit_start = self.interval_start - self.post_guard
+            self.hops_to_beacon -= 1
 
         return ninput_items
