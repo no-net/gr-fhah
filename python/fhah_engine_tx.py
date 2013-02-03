@@ -117,7 +117,7 @@ class fhah_engine_tx(gr.block):
 
         self.hops_to_beacon = 10
         self.diff_last_beacon = 0
-        self.max_hops_to_beacon = 80
+        self.max_hops_to_beacon = 5
         self.beacon_msg = numpy.ones((1, 5), dtype='uint8')[0]
 
     def hop(self):
@@ -171,13 +171,12 @@ class fhah_engine_tx(gr.block):
         """
         # Randomly set no of hops to next beacon (add diff from last beacon, so
         # that send only one beacon in mac_hops_to_beacon!)
-        beacon_slot = random.randint(0, self.max_hops_to_beacon)
+        beacon_slot = random.randint(1, self.max_hops_to_beacon)
         self.hops_to_beacon = self.diff_last_beacon + beacon_slot
         self.diff_last_beacon = self.max_hops_to_beacon - beacon_slot
         #print self.diff_last_beacon
 
         time_object = int(math.floor(self.antenna_start)), (self.antenna_start % 1)
-        print "Beacon sent at: ", time_object
 
         # Create msg and add to tx_queue before calling transmit
         data = numpy.concatenate([HAS_NO_DATA, self.beacon_msg])
@@ -187,6 +186,8 @@ class fhah_engine_tx(gr.block):
                       pmt.pmt_string_to_symbol('full'),
                       pmt.from_python(tx_object),
                       pmt.pmt_string_to_symbol('tdma'))
+
+        print "Beacon sent at: ", time_object
 
     def tx_data(self):
         """
@@ -338,6 +339,8 @@ class fhah_engine_tx(gr.block):
             if self.hops_to_beacon == 0:
                 self.tx_beacon()
             else:
+                if self.hops_to_beacon < 0:
+                    print "BEACONERROR"
             #   self.send_beacon() -> wie get_cts (mit sensing)
             #       --> setzt next_beacon_slot eins/zufaellig hoeher wenn Kanal
             #       belegt!
