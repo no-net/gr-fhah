@@ -93,7 +93,7 @@ class fhah_engine_rx(gr.block):
 
         self.rx_state = RX_INIT
         self.plkt_received = False
-        self.tune_lead = 0.010
+        self.rx_delay = 0.001  # TODO: war bei 0.01
         self.rx_hop_index = 0
         self.consecutive_miss = 0
 
@@ -119,6 +119,7 @@ class fhah_engine_rx(gr.block):
             if msg.offset == INCOMING_PKT_PORT:
                 #print "MSG RECEIVED"
                 pkt = pmt.pmt_blob_data(msg.value)
+                #print msg.value
                 if pkt[0]:
                     blob = self.mgr.acquire(True)  # block
                     pmt.pmt_blob_resize(blob, len(pkt) - 1)
@@ -131,8 +132,9 @@ class fhah_engine_rx(gr.block):
                     if self.rx_state == RX_SEARCH:
                         self.rx_state = RX_FOUND
                         self.pkt_received = True
-                        self.next_tune_time = self.time_update + self.hop_interval - self.tune_lead
-                        self.start_hop = self.next_tune_time - self.pre_guard
+                        self.start_hop = self.time_update + self.hop_interval - self.pre_guard - (self.rx_delay * 7)
+                        # TODO: - self.received_sensing_time
+                        self.next_tune_time = self.start_hop
                         print 'Received packet.  Locked.  Hopping initialized.'
                     else:
                         self.pkt_received = True
@@ -188,7 +190,7 @@ class fhah_engine_rx(gr.block):
                               pmt.pmt_string_to_symbol('fhss'))
                 self.rx_hop_index = (self.rx_hop_index + 1) % self.rx_freq_list_length
                 self.start_hop += self.hop_interval
-                self.next_tune_time = self.start_hop - self.pre_guard
+                self.next_tune_time = self.start_hop
                 #self.next_rx_interval += self.hop_interval - self.tune_lead
                 if self.pkt_received:
                     self.consecutive_miss = 0

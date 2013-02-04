@@ -32,7 +32,8 @@ BROADCAST_ADDR = 255
 
 #block port definitions - inputs
 OUTGOING_PKT_PORT = 0
-CTRL_PORT = 1
+INCOMING_PKT_PORT = 1
+CTRL_PORT = 2
 
 #block port definitions - outputs
 TO_FRAMER_PORT = 0
@@ -53,6 +54,12 @@ LOST_SYNC_THRESHOLD = 5
 #Protocol Fields
 HAS_DATA = numpy.ones((1, 1), dtype='uint8')[0]
 HAS_NO_DATA = numpy.zeros((1, 1), dtype='uint8')[0]
+
+#Carrier Sensing
+CS_SENSING = 0
+CS_IDLE = 1
+CS_CARRIER_SENSED = 2
+CS_NO_CARRIER_SENSED = 3
 
 
 class fhah_engine_tx(gr.block):
@@ -112,8 +119,9 @@ class fhah_engine_tx(gr.block):
         self.rx_hop_index = 0
         self.consecutive_miss = 0
 
-        self.got_cts = False
         self.max_sense_time = 0.005  # max sensing time in s
+        self.cs_state = CS_IDLE
+        self.sensing_tresshold = 32
 
         self.hops_to_beacon = 10
         self.diff_last_beacon = 0
@@ -142,12 +150,24 @@ class fhah_engine_tx(gr.block):
                       pmt.pmt_string_to_symbol('fhss'))
         #print "----> NEXT CMD: %s" % self.tx_freq_list[self.hop_index]
         self.post_msg(CTRL_PORT,
-                      pmt.pmt_string_to_symbol('usrp_sink.clear_command_time'),
+                      pmt.pmt_string_to_symbol('usrp_sink.clear_comman.d_time'),
                       pmt.from_python(((0, ),
                       {})),
                       pmt.pmt_string_to_symbol('fhss'))
         self.hop_index = (self.hop_index + 1) % self.tx_freq_list_length
         #print self.hop_index,self.interval_start
+
+    def carrier_sensing(self, time_to_sense):
+        """
+        Sense for carrier after time_to_sense.
+        """
+        #ssad
+        print "Carrier sensing at: %s" % time_to_sense
+        self.cs_state = CS_SENSING
+        if self.probe_block.level() > self.sensing_treshold:
+            self.cs_state = CS_CARRIER_SENSED
+        else:
+            self.cs_state = CS_NO_CARRIER_SENSED
 
     def get_cts(self):
         """
@@ -287,6 +307,11 @@ class fhah_engine_tx(gr.block):
             if msg.offset == OUTGOING_PKT_PORT:
                 self.queue.put(msg)  # if outgoing, put in queue for processing
 
+            elif msg.offset == INCOMING_PKT_PORT:
+                # CHECK FOR CTS
+                # --> Reset timing
+                print "CTS received"
+
             else:
                 pass  # CONTROL port
 
@@ -335,22 +360,27 @@ class fhah_engine_tx(gr.block):
         if self.time_update > self.time_transmit_start:
             self.antenna_start = self.interval_start + self.pre_guard
             self.hop()
-            #print self.hops_to_beacon
             if self.hops_to_beacon == 0:
                 self.tx_beacon()
-            else:
-                if self.hops_to_beacon < 0:
-                    print "BEACONERROR"
             #   self.send_beacon() -> wie get_cts (mit sensing)
             #       --> setzt next_beacon_slot eins/zufaellig hoeher wenn Kanal
             #       belegt!
-                if self.got_cts:  # ACHTUNG: got_cts abh. von dest.addr! -> got_cts[dest]
-                #               ---> Pakete muessen in unterschiedl queues
-                #               abgearbeitet werden ODER strikt wie Pakete
-                #               ankommen -> besser was max. Latenzen angeht!
-                    self.tx_data()   # do more than this?
-                else:
-                    self.get_cts()
+#            if self.cs_state == CS_SENSING:
+#                # We reached the next time_trasnmit_start from sensing
+#                self.carrier_sensing()
+#            if self.got_cts:
+#                self.tx_data()   # do more than this?
+#            else:
+#                self.cs_state = CS_SENSING
+#            if self.cs_state == CS_NO_CARRIER_SENSED:  # ACHTUNG: got_cts abh. von dest.addr! -> got_cts[dest]
+#                #               ---> Pakete muessen in unterschiedl queues
+#                #               abgearbeitet werden ODER strikt wie Pakete
+#                #               ankommen -> besser was max. Latenzen angeht!
+#                if self.hops_to_beacon == 0:
+#                    self.tx_beacon()
+#                # Add get_cts
+#            else:
+#                self.get_cts()
             self.interval_start += self.hop_interval
             self.time_transmit_start = self.interval_start - self.post_guard
             self.hops_to_beacon -= 1
