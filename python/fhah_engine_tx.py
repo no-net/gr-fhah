@@ -83,8 +83,8 @@ class fhah_engine_tx(gr.block):
         self.tx_freq_list_length = len(self.tx_freq_list)
         self.hop_index = 0
 
-        self.bytes_per_slot = int((self.hop_interval - self.post_guard -
-                                   self.pre_guard) * self.link_bps / 8)
+        self.slot_duration = self.hop_interval - self.pre_guard - self.post_guard
+        self.bytes_per_slot = int(self.slot_duration * self.link_bps / 8)
 
         self.queue = Queue.Queue()  # queue for msg destined for ARQ path
         self.tx_queue = Queue.Queue()
@@ -113,10 +113,12 @@ class fhah_engine_tx(gr.block):
         self.rx_hop_index = 0
         self.consecutive_miss = 0
 
-        self.hops_to_beacon = 10
+        self.hops_to_beacon = 100
         self.diff_last_beacon = 0
         self.max_hops_to_beacon = 5
         self.beacon_msg = numpy.ones((1, 5), dtype='uint8')[0]
+
+        self.rts_msg = numpy.array([[0, 0, 1, 0, 0]], dtype='uint8')[0]
 
     def hop(self):
         """
@@ -151,19 +153,12 @@ class fhah_engine_tx(gr.block):
         """
         Send RTS after random amount of time and wait for CTS.
         """
-        # Wait random amount of time between 0 and max_sense_time s.
-        random.uniform(0, self.max_sense_time)
-        # TODO: Set self.time_transmit_start to new random time while sensing
-        # for a carrier -> set sensing-flag, so that the fg won't start to
-        # transmit within this time. Release flag on second call.
-        # TODO: Checke nur kurz vor senden!
-
-        # Sense for carrier
-
-        # Start transmission if no carrier sensed
         # Create RTS msg and call transmit, wait for CTS
+        max_delay_in_slot = self.slot_duration / 2
 
-    def tx_beacon(self):
+        self.tx_signaling(max_delay_in_slot, self.rts_msg)
+
+    def send_beacon(self):
         """
         Send at least one beacon in max_hops_to_beacon.
         """
@@ -174,10 +169,22 @@ class fhah_engine_tx(gr.block):
         self.diff_last_beacon = self.max_hops_to_beacon - beacon_slot
         #print self.diff_last_beacon
 
-        time_object = int(math.floor(self.antenna_start)), (self.antenna_start % 1)
+        max_delay_in_slot = self.slot_duration - 0.001
+
+        self.tx_signaling(max_delay_in_slot, self.beacon_msg)
+
+    def tx_signaling(self, max_delay_in_slot, msg):
+        """
+        Send signaling/control frames (no data).
+        """
+        # Send after random amount of time in this bin/slot/hop
+        delay = random.uniform(0, max_delay_in_slot)
+        ant_start = self.antenna_start + delay
+
+        time_object = int(math.floor(ant_start)), (ant_start % 1)
 
         # Create msg and add to tx_queue before calling transmit
-        data = numpy.concatenate([HAS_NO_DATA, self.beacon_msg])
+        data = numpy.concatenate([HAS_NO_DATA, msg])
         more_frames = 0
         tx_object = time_object, data, more_frames
         self.post_msg(TO_FRAMER_PORT,
@@ -217,53 +224,46 @@ class fhah_engine_tx(gr.block):
             else:
                 self.has_old_msg = False
                 self.tx_queue.put(msg)
+                self.got_cts = False
                 frame_count += 1
 
         if frame_count > 0:
-            self.transmit(True, frame_count)
 
-    def transmit(self, is_data, frame_count):
-        """
-        Send Frames from tx_queue to Packet framer.
-        """
-        time_object = int(math.floor(self.antenna_start)), (self.antenna_start % 1)
-        print time_object
+            time_object = int(math.floor(self.antenna_start)), (self.antenna_start % 1)
+            print time_object
 
-        #print frame_count,self.queue.qsize(), self.tx_queue.qsize()
-        #send first frame w tuple for tx_time and number of frames to put
-        #in slot
-        blob = self.mgr.acquire(True)  # block
-        more_frames = frame_count - 1
-        msg = self.tx_queue.get()
-        if is_data:
-            data = numpy.concatenate([HAS_DATA, pmt.pmt_blob_data(msg.value)])
-        else:
-            data = numpy.concatenate([HAS_NO_DATA, self.pad_data])
-        #print "DATA-SEND: %s" % data
-        tx_object = time_object, data, more_frames
-        self.post_msg(TO_FRAMER_PORT,
-                      pmt.pmt_string_to_symbol('full'),
-                      pmt.from_python(tx_object),
-                      pmt.pmt_string_to_symbol('tdma'))
-        frame_count -= 1
-
-        #old_data = []
-        #print 'frame count: ',frame_count
-        #send remining frames, blob only
-        while(frame_count > 0):
-            msg = self.tx_queue.get()
-            data = numpy.concatenate([HAS_DATA,
-                                     pmt.pmt_blob_data(msg.value)])
+            #print frame_count,self.queue.qsize(), self.tx_queue.qsize()
+            #send first frame w tuple for tx_time and number of frames to put
+            #in slot
             blob = self.mgr.acquire(True)  # block
-            pmt.pmt_blob_resize(blob, len(data))
-            pmt.pmt_blob_rw_data(blob)[:] = data
+            more_frames = frame_count - 1
+            msg = self.tx_queue.get()
+            data = numpy.concatenate([HAS_DATA, pmt.pmt_blob_data(msg.value)])
+            #print "DATA-SEND: %s" % data
+            tx_object = time_object, data, more_frames
             self.post_msg(TO_FRAMER_PORT,
-                          pmt.pmt_string_to_symbol('d_only'),
-                          blob,
+                          pmt.pmt_string_to_symbol('full'),
+                          pmt.from_python(tx_object),
                           pmt.pmt_string_to_symbol('tdma'))
             frame_count -= 1
 
-        #print total_byte_count
+            #old_data = []
+            #print 'frame count: ',frame_count
+            #send remining frames, blob only
+            while(frame_count > 0):
+                msg = self.tx_queue.get()
+                data = numpy.concatenate([HAS_DATA,
+                                          pmt.pmt_blob_data(msg.value)])
+                blob = self.mgr.acquire(True)  # block
+                pmt.pmt_blob_resize(blob, len(data))
+                pmt.pmt_blob_rw_data(blob)[:] = data
+                self.post_msg(TO_FRAMER_PORT,
+                              pmt.pmt_string_to_symbol('d_only'),
+                              blob,
+                              pmt.pmt_string_to_symbol('tdma'))
+                frame_count -= 1
+
+            #print total_byte_count
 
     def work(self, input_items, output_items):
 
@@ -339,11 +339,11 @@ class fhah_engine_tx(gr.block):
             self.antenna_start = self.interval_start + self.pre_guard
             self.hop()
             if self.hops_to_beacon == 0:
-                self.tx_beacon()
+                self.send_beacon()
             #   self.send_beacon() -> wie get_cts (mit sensing)
             #       --> setzt next_beacon_slot eins/zufaellig hoeher wenn Kanal
             #       belegt!
-            if self.got_cts:
+            elif self.got_cts:
                 self.tx_data()   # do more than this?
             else:
                 self.get_cts()
