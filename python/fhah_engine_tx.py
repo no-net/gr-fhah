@@ -156,6 +156,8 @@ class fhah_engine_tx(gr.block):
         # Create RTS msg and call transmit, wait for CTS
         max_delay_in_slot = self.slot_duration / 2
 
+        # TODO: RTS msg muss Quelle und Ziel enthalten und als CTS umgekehrt
+        # fordern! -> rts_indicator + src + dest
         self.tx_signaling(max_delay_in_slot, self.rts_msg)
 
     def send_beacon(self):
