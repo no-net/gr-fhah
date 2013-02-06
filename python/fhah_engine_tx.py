@@ -55,6 +55,11 @@ LOST_SYNC_THRESHOLD = 5
 HAS_DATA = numpy.ones((1, 1), dtype='uint8')[0]
 HAS_NO_DATA = numpy.zeros((1, 1), dtype='uint8')[0]
 
+RTS_IND = numpy.array([1, 0], dtype='uint8')
+CTS_IND = numpy.array([0, 1], dtype='uint8')
+
+BCN_IND = numpy.array([0, 0], dtype='uint8')
+
 
 class fhah_engine_tx(gr.block):
     """
@@ -113,12 +118,15 @@ class fhah_engine_tx(gr.block):
         self.rx_hop_index = 0
         self.consecutive_miss = 0
 
+        self.max_hops_to_beacon = 100
         self.hops_to_beacon = 100
         self.diff_last_beacon = 0
-        self.max_hops_to_beacon = 5
         self.beacon_msg = numpy.ones((1, 5), dtype='uint8')[0]
 
-        self.rts_msg = numpy.array([[0, 0, 1, 0, 0]], dtype='uint8')[0]
+        self.rts_msg = numpy.array([0, 0, 1, 0, 0], dtype='uint8')[0]
+        self.got_cts = False
+
+        self.own_adr = numpy.array([0, 0, 1], dtype='uint8')
 
     def hop(self):
         """
@@ -173,9 +181,11 @@ class fhah_engine_tx(gr.block):
 
         max_delay_in_slot = self.slot_duration - 0.001
 
-        self.tx_signaling(max_delay_in_slot, self.beacon_msg)
+        dst_adr = numpy.array([0, 0, 0], dtype='uint8')  # Broadcast Address
 
-    def tx_signaling(self, max_delay_in_slot, msg):
+        self.tx_signaling(max_delay_in_slot, BCN_IND, dst_adr, self.beacon_msg)
+
+    def tx_signaling(self, max_delay_in_slot, msg_type, dst_adr, msg):
         """
         Send signaling/control frames (no data).
         """
@@ -186,7 +196,11 @@ class fhah_engine_tx(gr.block):
         time_object = int(math.floor(ant_start)), (ant_start % 1)
 
         # Create msg and add to tx_queue before calling transmit
-        data = numpy.concatenate([HAS_NO_DATA, msg])
+        data = numpy.concatenate([HAS_NO_DATA,
+                                  msg_type,
+                                  self.own_adr,
+                                  dst_adr,
+                                  msg])
         more_frames = 0
         tx_object = time_object, data, more_frames
         self.post_msg(TO_FRAMER_PORT,
@@ -290,7 +304,23 @@ class fhah_engine_tx(gr.block):
             elif msg.offset == INCOMING_PKT_PORT:
                 # CHECK FOR CTS
                 # --> Reset timing
-                print "CTS received"
+                pkt = pmt.pmt_blob_data(msg.value)
+                print pkt
+                print pkt[0]
+                if not pkt[0]:
+                    print "--TX: Signaling Packet received."
+                    # TODO: Wenn hier noch DATA bgefangen/weitergeleitet wird,
+                    # dann ist der empfaener hier schon vollstaendig integriert
+                    # und der block wird zum transceiver!!!
+                    # TODO: Synchronisation auf BCN-pakete noch implementieren!
+                    if pkt[1:3] == RTS_IND:
+                        print "----RTS received"
+                    if pkt[1:3] == CTS_IND:
+                        print "----CTS received"
+                    if pkt[1:3] == BCN_IND:
+                        print "----BCN received"
+                # TODO: CHECKE OB DATEN TATSAECHLICH BINAER VOM FRAMER
+                # INTERPRETIERT WERDEN!!! ->speichern der nachbarn etc.
 
             else:
                 pass  # CONTROL port
@@ -345,7 +375,7 @@ class fhah_engine_tx(gr.block):
             #   self.send_beacon() -> wie get_cts (mit sensing)
             #       --> setzt next_beacon_slot eins/zufaellig hoeher wenn Kanal
             #       belegt!
-            elif self.got_cts:
+        elif not self.got_cts:  # TODO: NUR DEBUG -> NEGIEREN!!!
                 self.tx_data()   # do more than this?
             else:
                 self.get_cts()
