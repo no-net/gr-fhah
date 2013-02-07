@@ -40,17 +40,17 @@
         <type>complex</type>
     </sink>
     <sink>
-        <name>out_pkt_in</name>
+        <name>from_app</name>
         <type></type>
         <optional>1</optional>
     </sink>
     <sink>
-        <name>in_pkt_in</name>
+        <name>from_deframer</name>
         <type></type>
         <optional>1</optional>
     </sink>
     <sink>
-        <name>ctrl_port_in</name>
+        <name>ctrl_in</name>
         <type></type>
         <optional>1</optional>
     </sink>
@@ -60,7 +60,12 @@
         <optional>1</optional>
     </source>
     <source>
-        <name>ctrl_port_out</name>
+        <name>ctrl_out</name>
+        <type></type>
+        <optional>1</optional>
+    </source>
+    <source>
+        <name>to_app</name>
         <type></type>
         <optional>1</optional>
     </source>
