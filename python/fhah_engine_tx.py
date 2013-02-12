@@ -210,7 +210,7 @@ class fhah_engine_tx(gr.block):
 
         self.tx_signaling(max_delay_in_slot, IS_BCN, self.bcst_adr)
         if self.own_adr == 1:
-            print self.interval_start % 1
+            print int(math.floor(self.interval_start)), " - ", self.interval_start % 1
 
     def tx_signaling(self, max_delay_in_slot, msg_type, dst_adr):
         """
@@ -341,8 +341,10 @@ class fhah_engine_tx(gr.block):
                 # TODO: CHECK FOR CTS
                 # --> Reset timing
                 pkt = pmt.pmt_blob_data(msg.value)
+                #if self.own_adr == 2:
+                    #print "PKT RECEIVED -> pkt[0]: ", pkt[0], " to address: ", pkt[1]
                 if pkt[1] != self.own_adr:
-                    #print pkt
+                    #print "pkt not addressed to own address -> receiving!"
                     if pkt[0] == HAS_DATA:
                         print "DATA received"
                         blob = self.mgr.acquire(True)  # block
@@ -352,24 +354,27 @@ class fhah_engine_tx(gr.block):
                                       pmt.pmt_string_to_symbol('rx'),
                                       blob,
                                       pmt.pmt_string_to_symbol('fhss'))
-                    if pkt[0] == IS_RTS:
+                    elif pkt[0] == IS_RTS:
                         print "RTS received"
-                    if pkt[0] == IS_CTS:
+                    elif pkt[0] == IS_CTS:
                         print "CTS received"
                         if pkt[1] == self.dst_adr:
                             self.got_cts = True
-                    if pkt[0] == IS_BCN:
-                        #print "BCN received"
+                    elif (pkt[0] == 159) or (pkt[0] == IS_BCN):
+                        #print "BCN received, addressed to: ", pkt[1]
                         # TODO: Sync to beacon!
                         #if self.know_time:  # and pkt[1] < self.own_adr:
                         if self.know_time and (pkt[1] < self.own_adr):
                             #self.time_tune_start = self.time_update + self.hop_interval - self.pre_guard - self.rx_delay
-                            self.time_tune_start = self._msg_to_time(pkt[3:11])[0] + self.hop_interval
-                            self.interval_start = self.time_tune_start - self.post_guard
-                            if self.own_adr == 2:  # TODO: BUG? -> USRP 2 one second too late
-                                self.interval_start += 1
-                            self.hop_index = pkt[11]
-                            print "SYNCED to: ", self.interval_start
+                            self.time_tune_start = self._msg_to_time(pkt[3:11])[0] + (2 * self.hop_interval)
+                            self.interval_start = self.time_tune_start
+#                            if self.own_adr == 2:  # TODO: BUG? -> USRP 2 one second too late
+#                                self.interval_start += 1
+#                                self.time_tune_start += 1
+                            self.hop_index = (pkt[11] + 1) % self.tx_freq_list_length
+                            print "SYNCED to: ", int(math.floor(self.time_tune_start)), " - ", self.time_tune_start % 1
+                            #print "--- TIME NOW: ", int(math.floor(self.time_update)), " - ", self.time_update % 1
+                            #print "SYNCED to: ", self.interval_start % 1
                             #print "TIME SENT: ", self._msg_to_time(pkt[3:11])
                             #print "time_now: ", self.time_update % 1, "  --- Hop index: ", self.hop_index
 #                        elif pkt[1] > self.own_adr:
@@ -438,7 +443,10 @@ class fhah_engine_tx(gr.block):
             self.antenna_start = self.interval_start + self.pre_guard
             self.hop()
             if self.hops_to_beacon == 0:
-                self.send_beacon()
+                if self.own_adr == 1:
+                    self.send_beacon()
+                else:
+                    print "Would send beacon!"
             #   self.send_beacon() -> wie get_cts (mit sensing)
             #       --> setzt next_beacon_slot eins/zufaellig hoeher wenn Kanal
             #       belegt!
@@ -450,6 +458,7 @@ class fhah_engine_tx(gr.block):
                 # TODO: Wait random no of slots if no CTS received!
             self.interval_start += self.hop_interval
             self.time_tune_start = self.interval_start - self.post_guard
+            #print "Next Hop: ", int(math.floor(self.interval_start)), " - ", self.interval_start % 1
             self.hops_to_beacon -= 1
 
         return ninput_items
