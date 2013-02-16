@@ -23,6 +23,7 @@ import random
 import struct
 from gnuradio import gr
 from gruel import pmt
+#from gnuradio import uhd
 #import gnuradio.extras  # brings in gr.block
 import Queue
 import math
@@ -122,6 +123,8 @@ class fhah_engine_tx(gr.block):
         self.diff_last_beacon = 0
         self.beacon_msg = numpy.ones((1, 5), dtype='uint8')[0]
 
+        self.synced = False
+
         self.time_tune_start = 0
 
         self.rts_msg = numpy.array([0, 0, 1, 0, 0], dtype='uint8')[0]
@@ -160,7 +163,9 @@ class fhah_engine_tx(gr.block):
         for usrp in usrps:
             self.post_msg(CTRL_PORT,
                           pmt.pmt_string_to_symbol(usrp + '.set_command_time'),
-                          pmt.from_python(((self.interval_start, ), {})),
+                          #pmt.from_python(((self.interval_start, ), {})),
+                          pmt.from_python((('#!\nfrom gnuradio import uhd\narg = uhd.time_spec_t(' + repr(self.interval_start) + ')', ), {})),
+                          #pmt.from_python(((uhd.time_spec_t(self.interval_start)), {})),
                           pmt.pmt_string_to_symbol('fhss'))
             #print "NEXT USRP CMD: %s" % self.interval_start
             self.post_msg(CTRL_PORT,
@@ -169,7 +174,7 @@ class fhah_engine_tx(gr.block):
                           pmt.pmt_string_to_symbol('fhss'))
             #print "----> NEXT CMD: %s" % self.tx_freq_list[self.hop_index]
             self.post_msg(CTRL_PORT,
-                          pmt.pmt_string_to_symbol(usrp + '.clear_comman.d_time'),
+                          pmt.pmt_string_to_symbol(usrp + '.clear_command_time'),
                           pmt.from_python(((0, ), {})),
                           pmt.pmt_string_to_symbol('fhss'))
         self.hop_index = (self.hop_index + 1) % self.tx_freq_list_length
@@ -207,18 +212,20 @@ class fhah_engine_tx(gr.block):
         #print self.diff_last_beacon
 
         max_delay_in_slot = self.slot_duration - 0.001
+        delay = random.uniform(0, max_delay_in_slot)
 
-        self.tx_signaling(max_delay_in_slot, IS_BCN, self.bcst_adr)
+        self.tx_signaling(delay, IS_BCN, self.bcst_adr)
         if self.own_adr == 1:
             print int(math.floor(self.interval_start)), " - ", self.interval_start % 1
+            #print "-- DELAY: ", delay
 
-    def tx_signaling(self, max_delay_in_slot, msg_type, dst_adr):
+    def tx_signaling(self, delay_in_slot, msg_type, dst_adr):
         """
         Send signaling/control frames (no data).
         """
         # Send after random amount of time in this bin/slot/hop
-        delay = random.uniform(0, max_delay_in_slot)
-        ant_start = self.antenna_start + delay
+        ant_start = self.antenna_start + delay_in_slot
+        #print "---> Ant-start: ", int(math.floor(ant_start)), " - ", ant_start % 1
 
         time_msg = self._time_to_msg(self.interval_start)
         next_hop_index = numpy.array([self.hop_index], dtype='uint8')
@@ -322,6 +329,11 @@ class fhah_engine_tx(gr.block):
                           pmt.pmt_string_to_symbol('usrp_source.set_center_freq'),
                           pmt.from_python(((self.tx_freq_list[self.rx_hop_index], ), {})),
                           pmt.pmt_string_to_symbol('fhss'))
+            if self.own_adr == 1:
+                self.post_msg(CTRL_PORT,
+                              pmt.pmt_string_to_symbol('usrp_sink.set_center_freq'),
+                              pmt.from_python(((self.tx_freq_list[self.rx_hop_index], ), {})),
+                              pmt.pmt_string_to_symbol('fhss'))
             print 'Initialized to channel %s.  Searching...' % self.rx_hop_index
             self.rx_state = RX_SEARCH
 
@@ -364,16 +376,19 @@ class fhah_engine_tx(gr.block):
                         #print "BCN received, addressed to: ", pkt[1]
                         # TODO: Sync to beacon!
                         #if self.know_time:  # and pkt[1] < self.own_adr:
-                        if self.know_time and (pkt[1] < self.own_adr):
+                        if self.know_time and (pkt[1] < self.own_adr):  # and not self.synced:
                             #self.time_tune_start = self.time_update + self.hop_interval - self.pre_guard - self.rx_delay
                             self.time_tune_start = self._msg_to_time(pkt[3:11])[0] + (2 * self.hop_interval)
                             self.interval_start = self.time_tune_start
+                            self.time_tune_start -= 20 * self.post_guard
 #                            if self.own_adr == 2:  # TODO: BUG? -> USRP 2 one second too late
 #                                self.interval_start += 1
 #                                self.time_tune_start += 1
                             self.hop_index = (pkt[11] + 1) % self.tx_freq_list_length
-                            print "SYNCED to: ", int(math.floor(self.time_tune_start)), " - ", self.time_tune_start % 1
-                            #print "--- TIME NOW: ", int(math.floor(self.time_update)), " - ", self.time_update % 1
+                            print "SYNCED to: ", int(math.floor(self.time_tune_start)), " - ", self.time_tune_start % 1, "--- TIME NOW: ", int(math.floor(self.time_update)), " - ", self.time_update % 1
+                            diff = self.time_update - self.time_tune_start
+                            print "---> Diff: ", diff % 1
+                            self.synced = True
                             #print "SYNCED to: ", self.interval_start % 1
                             #print "TIME SENT: ", self._msg_to_time(pkt[3:11])
                             #print "time_now: ", self.time_update % 1, "  --- Hop index: ", self.hop_index
@@ -457,8 +472,8 @@ class fhah_engine_tx(gr.block):
                 #self.get_cts()
                 # TODO: Wait random no of slots if no CTS received!
             self.interval_start += self.hop_interval
-            self.time_tune_start = self.interval_start - self.post_guard
-            #print "Next Hop: ", int(math.floor(self.interval_start)), " - ", self.interval_start % 1
+            self.time_tune_start = self.interval_start - (20 * self.post_guard)
+            #print "Next Hop: ", int(math.floor(self.interval_start)), " - ", self.interval_start % 1, " ----- INDEX: ", self.hop_index
             self.hops_to_beacon -= 1
 
         return ninput_items
