@@ -109,7 +109,6 @@ class fhah_engine_tx(gr.block):
         self.has_old_msg = False
         self.overhead = 20
         self.pad_data = numpy.zeros((1, 5), dtype='uint8')[0]
-        #print self.pad_data
         self.tx_slots_passed = 0
 
         self.rx_state = RX_INIT
@@ -129,16 +128,25 @@ class fhah_engine_tx(gr.block):
 
         self.rts_msg = numpy.array([0, 0, 1, 0, 0], dtype='uint8')[0]
         self.got_cts = False
+        self.waiting_for_cts = False
+        self.hops_to_retx = 0
+        self.max_hops_to_retx = 10
+        self.retx_no = 1
+        self.got_rts = False
 
         self.own_adr = numpy.array([addr], dtype='uint8')
         self.bcst_adr = numpy.array([0], dtype='uint8')
-        self.dst_adr = self.bcst_adr
+        if self.own_adr == numpy.array([1], dtype='uint8'):
+            self.dst_adr = numpy.array([2], dtype='uint8')
+        else:
+            self.dst_adr = numpy.array([1], dtype='uint8')
 
     def _time_to_msg(self, time_obj):
         """
         Return the message (bytewise numpy.array) interpration of the time_obj.
         """
         string = struct.pack('d', time_obj)
+
         return numpy.fromstring(string, dtype=numpy.uint8)
 
     def _msg_to_time(self, time_msg):
@@ -146,57 +154,48 @@ class fhah_engine_tx(gr.block):
         Return time_obj as float.
         """
         string = time_msg.tostring()
+
         return struct.unpack('d', string)
 
     def hop(self):
         """
         Hop to next slot in frequency list.
         """
-        #send_sob
-        #self.post_msg(TO_FRAMER_PORT,
-        #              pmt.pmt_string_to_symbol('tx_sob'),
-        #              pmt.PMT_T, pmt.pmt_string_to_symbol('tx_sob')
-        #              )
-
-        #a = pmt.from_python(((self.tx_freq_list[self.hop_index], ), {}))
         usrps = ['usrp_sink', 'usrp_source']
+
         for usrp in usrps:
             self.post_msg(CTRL_PORT,
                           pmt.pmt_string_to_symbol(usrp + '.set_command_time'),
-                          #pmt.from_python(((self.interval_start, ), {})),
                           pmt.from_python((('#!\nfrom gnuradio import uhd\narg = uhd.time_spec_t(' + repr(self.interval_start) + ')', ), {})),
-                          #pmt.from_python(((uhd.time_spec_t(self.interval_start)), {})),
                           pmt.pmt_string_to_symbol('fhss'))
-            #print "NEXT USRP CMD: %s" % self.interval_start
             self.post_msg(CTRL_PORT,
                           pmt.pmt_string_to_symbol(usrp + '.set_center_freq'),
-                          pmt.from_python(((self.tx_freq_list[self.hop_index], ), {})),  # (( , ), {})),
+                          pmt.from_python(((self.tx_freq_list[self.hop_index], ), {})),
                           pmt.pmt_string_to_symbol('fhss'))
-            #print "----> NEXT CMD: %s" % self.tx_freq_list[self.hop_index]
             self.post_msg(CTRL_PORT,
                           pmt.pmt_string_to_symbol(usrp + '.clear_command_time'),
                           pmt.from_python(((0, ), {})),
                           pmt.pmt_string_to_symbol('fhss'))
+
         self.hop_index = (self.hop_index + 1) % self.tx_freq_list_length
-        #print self.hop_index,self.interval_start
 
     def get_cts(self):
         """
         Send RTS after random amount of time and wait for CTS.
         """
-        # Create RTS msg and call transmit, wait for CTS
+        # Create RTS msg, transmit. Send RTS within first half of slot
+        self.waiting_for_cts = True
         max_delay_in_slot = self.slot_duration / 2
 
-        # TODO: RTS msg muss Quelle und Ziel enthalten und als CTS umgekehrt
-        # fordern! -> rts_indicator + src + dest
         self.tx_signaling(max_delay_in_slot, IS_RTS, self.dst_adr)
 
     def send_cts(self):
         """
         Send CTS after RTS was received.
         """
-        # Create RTS msg and call transmit, wait for CTS
-        max_delay_in_slot = 0
+        # TODO: Send CTS within the same slot!
+        # Create CTS msg, send without delay.
+        max_delay_in_slot = 0.001
 
         self.tx_signaling(max_delay_in_slot, IS_CTS, self.dst_adr)
 
@@ -205,27 +204,23 @@ class fhah_engine_tx(gr.block):
         Send at least one beacon in max_hops_to_beacon.
         """
         # Randomly set no of hops to next beacon (add diff from last beacon, so
-        # that send only one beacon in mac_hops_to_beacon!)
+        # that only one beacon is sent in max_hops_to_beacon!)
         beacon_slot = random.randint(1, self.max_hops_to_beacon)
         self.hops_to_beacon = self.diff_last_beacon + beacon_slot
         self.diff_last_beacon = self.max_hops_to_beacon - beacon_slot
-        #print self.diff_last_beacon
 
+        # Distribute time to send beacon randomly in slot
         max_delay_in_slot = self.slot_duration - 0.001
-        delay = random.uniform(0, max_delay_in_slot)
 
-        self.tx_signaling(delay, IS_BCN, self.bcst_adr)
-        if self.own_adr == 1:
-            print int(math.floor(self.interval_start)), " - ", self.interval_start % 1
-            #print "-- DELAY: ", delay
+        self.tx_signaling(max_delay_in_slot, IS_BCN, self.bcst_adr)
 
-    def tx_signaling(self, delay_in_slot, msg_type, dst_adr):
+    def tx_signaling(self, max_delay_in_slot, msg_type, dst_adr):
         """
         Send signaling/control frames (no data).
         """
         # Send after random amount of time in this bin/slot/hop
-        ant_start = self.antenna_start + delay_in_slot
-        #print "---> Ant-start: ", int(math.floor(ant_start)), " - ", ant_start % 1
+        delay = random.uniform(0, max_delay_in_slot)
+        ant_start = self.antenna_start + delay
 
         time_msg = self._time_to_msg(self.interval_start)
         next_hop_index = numpy.array([self.hop_index], dtype='uint8')
@@ -245,8 +240,7 @@ class fhah_engine_tx(gr.block):
                       pmt.from_python(tx_object),
                       pmt.pmt_string_to_symbol('tdma'))
 
-        #print "Beacon sent at: ", time_object
-        #print "Ant start: ", time_object, "  Hop index:", self.hop_index
+        #print msg_type, " - ", self.interval_start % 1, " - TO: ", dst_adr, " - at: ", repr(self.interval_start), " - time now: ", repr(self.time_update)
 
     def tx_data(self):
         """
@@ -295,13 +289,18 @@ class fhah_engine_tx(gr.block):
             blob = self.mgr.acquire(True)  # block
             more_frames = frame_count - 1
             msg = self.tx_queue.get()
-            data = numpy.concatenate([HAS_DATA, pmt.pmt_blob_data(msg.value)])
+            data = numpy.concatenate([HAS_DATA,
+                                      self.own_adr,
+                                      self.dst_adr,
+                                      pmt.pmt_blob_data(msg.value)])
             #print "DATA-SEND: %s" % data
             tx_object = time_object, data, more_frames
             self.post_msg(TO_FRAMER_PORT,
                           pmt.pmt_string_to_symbol('full'),
                           pmt.from_python(tx_object),
                           pmt.pmt_string_to_symbol('tdma'))
+            print " MSG POSTED!"
+            print " - Ant start:", repr(self.antenna_start), " - TO: ", self.dst_adr, " - at: ", repr(self.interval_start), " - time now: ", repr(self.time_update)
             frame_count -= 1
 
             #old_data = []
@@ -310,6 +309,8 @@ class fhah_engine_tx(gr.block):
             while(frame_count > 0):
                 msg = self.tx_queue.get()
                 data = numpy.concatenate([HAS_DATA,
+                                          self.own_adr,
+                                          self.dst_adr,
                                           pmt.pmt_blob_data(msg.value)])
                 blob = self.mgr.acquire(True)  # block
                 pmt.pmt_blob_resize(blob, len(data))
@@ -325,19 +326,13 @@ class fhah_engine_tx(gr.block):
     def work(self, input_items, output_items):
 
         if self.rx_state == RX_INIT:
-            self.post_msg(CTRL_PORT,
-                          pmt.pmt_string_to_symbol('usrp_source.set_center_freq'),
-                          pmt.from_python(((self.tx_freq_list[self.rx_hop_index], ), {})),
-                          pmt.pmt_string_to_symbol('fhss'))
-            if self.own_adr == 1:
+            for usrp in ['usrp_source', 'usrp_sink']:
                 self.post_msg(CTRL_PORT,
-                              pmt.pmt_string_to_symbol('usrp_sink.set_center_freq'),
+                              pmt.pmt_string_to_symbol(usrp + '.set_center_freq'),
                               pmt.from_python(((self.tx_freq_list[self.rx_hop_index], ), {})),
                               pmt.pmt_string_to_symbol('fhss'))
-            print 'Initialized to channel %s.  Searching...' % self.rx_hop_index
-            self.rx_state = RX_SEARCH
 
-            #self.rx_hop_index = (self.rx_hop_index + 1) % self.tx_freq_list_length
+            self.rx_state = RX_SEARCH
 
         #check for msg inputs when work function is called
         if self.check_msg_queue():
@@ -350,13 +345,9 @@ class fhah_engine_tx(gr.block):
                 self.queue.put(msg)  # if outgoing, put in queue for processing
 
             elif msg.offset == INCOMING_PKT_PORT:
-                # TODO: CHECK FOR CTS
-                # --> Reset timing
                 pkt = pmt.pmt_blob_data(msg.value)
-                #if self.own_adr == 2:
-                    #print "PKT RECEIVED -> pkt[0]: ", pkt[0], " to address: ", pkt[1]
-                if pkt[1] != self.own_adr:
-                    #print "pkt not addressed to own address -> receiving!"
+                print "MSG from ", pkt[1], " - to ", pkt[2], " type: ", pkt[0]
+                if pkt[1] != self.own_adr and pkt[2] in [self.own_adr, self.bcst_adr]:
                     if pkt[0] == HAS_DATA:
                         print "DATA received"
                         blob = self.mgr.acquire(True)  # block
@@ -368,55 +359,54 @@ class fhah_engine_tx(gr.block):
                                       pmt.pmt_string_to_symbol('fhss'))
                     elif pkt[0] == IS_RTS:
                         print "RTS received"
+                        # TODO: Check own queues, if transmission is running
+                        self.got_rts = True
                     elif pkt[0] == IS_CTS:
                         print "CTS received"
                         if pkt[1] == self.dst_adr:
                             self.got_cts = True
-                    elif (pkt[0] == 159) or (pkt[0] == IS_BCN):
-                        #print "BCN received, addressed to: ", pkt[1]
-                        # TODO: Sync to beacon!
-                        #if self.know_time:  # and pkt[1] < self.own_adr:
-                        if self.know_time and (pkt[1] < self.own_adr):  # and not self.synced:
-                            #self.time_tune_start = self.time_update + self.hop_interval - self.pre_guard - self.rx_delay
+                            self.waiting_for_cts = False
+                            self.hops_to_retx = 0
+                            self.retx_no = 1
+                    elif pkt[0] == IS_BCN:
+                        # Sync to beacon if pkt is from node with higher prio!
+                        if (pkt[1] < self.own_adr):  # and not self.synced:
                             self.time_tune_start = self._msg_to_time(pkt[3:11])[0] + (2 * self.hop_interval)
                             self.interval_start = self.time_tune_start
-                            self.time_tune_start -= 20 * self.post_guard
-#                            if self.own_adr == 2:  # TODO: BUG? -> USRP 2 one second too late
-#                                self.interval_start += 1
-#                                self.time_tune_start += 1
+
+                            # Send tune command before the USRP has to tune
+                            self.time_tune_start -= 10 * self.post_guard
+
                             self.hop_index = (pkt[11] + 1) % self.tx_freq_list_length
-                            print "SYNCED to: ", int(math.floor(self.time_tune_start)), " - ", self.time_tune_start % 1, "--- TIME NOW: ", int(math.floor(self.time_update)), " - ", self.time_update % 1
-                            diff = self.time_update - self.time_tune_start
-                            print "---> Diff: ", diff % 1
+                            if self.hops_to_beacon != 0:
+                                self.hops_to_beacon -= 1
+
+                            if not self.synced:
+                                print "SYNCED!"
                             self.synced = True
-                            #print "SYNCED to: ", self.interval_start % 1
-                            #print "TIME SENT: ", self._msg_to_time(pkt[3:11])
-                            #print "time_now: ", self.time_update % 1, "  --- Hop index: ", self.hop_index
-#                        elif pkt[1] > self.own_adr:
-#                            print "Not syncing!"
-#                            print "time: ", self.time_update
+                            # TODO: check if time is in future
+                            #print "SYNCED to: ", int(math.floor(self.time_tune_start)), " - ", self.time_tune_start % 1, "--- TIME NOW: ", int(math.floor(self.time_update)), " - ", self.time_update % 1
+
+                        #elif pkt[1] > self.own_adr:
+                        #    print "Not syncing to higher device address!"
                     else:
                         print "ERROR: Wrong Type!"
                 #else:
-                #    print "Not addressed to this station"
-                    # TODO: Addressing ueber deframer
-                # INTERPRETIERT WERDEN!!! ->speichern der nachbarn etc.
+                #    print "Not addressed to this station - adr to: ", pkt[2]
 
             else:
-                pass  # CONTROL port
+                pass
 
-        #in0 = input_items[0]
         nread = self.nitems_read(0)  # number of items read on port 0
         ninput_items = len(input_items[0])
 
-        if not self.know_time:  # TODO: Move this to next IF!
+        if not self.know_time:
             #process streaming samples and tags here
 
-            #read all tags associated with port 0 for items in this work function
+            #read all tags associated with port 0 for items
             tags = self.get_tags_in_range(0, nread, nread + ninput_items)
 
-            #lets find all of our tags, making the appropriate adjustments to our
-            #timing
+            #find all of our tags, making the adjustments to our timing
             for tag in tags:
                 key_string = pmt.pmt_symbol_to_string(tag.key)
                 if key_string == "rx_time":
@@ -429,51 +419,62 @@ class fhah_engine_tx(gr.block):
                     self.sample_period = 1 / self.rate
                     self.found_rate = True
 
-        #determine first transmit slot when we learn the time
-        if not self.know_time:
             if self.found_time and self.found_rate:
                 self.know_time = True
-                #TODO: this stuff is left over from tdma.py, see if we can re-use this somehow
-                #self.frame_period = self.slot_interval * self.num_slots
-                #my_fraction_frame = ( self.initial_slot * 1.0 ) / ( self.num_slots)
-                #frame_count = math.floor(self.time_update / self.frame_period)
-                #current_slot_interval = ( self.time_update % self.frame_period ) / self.frame_period
-                #self.time_transmit_start = (frame_count + 2) * self.frame_period + ( my_fraction_frame * self.frame_period ) - self.lead_limit
 
-                #self.time_tune_start = self.time_update + (self.post_guard * 10.0)  # TODO: ser pre_guard time!
-                #self.interval_start = self.time_tune_start + self.post_guard
-
-        #get current time
+        #get/update current time
         self.time_update += (self.sample_period * ninput_items)
 
         # Set first tuning time 20 sec in future (hope that we receive beacon
         # pkg within this time for sync -> assume that we're the only node if not)
         if self.time_tune_start == 0:
-            self.interval_start = self.time_update + 10
+            if self.own_adr == 1:  # TODO: ONLY FOR DEBUGGING
+                self.interval_start = self.time_update + 2
+            else:
+                self.interval_start = self.time_update + 20
             self.time_tune_start = self.interval_start - self.post_guard
 
-        #determine if it's time for us to start tx'ing, start process self.lead_limit seconds
-        #before our slot actually begins (i.e. deal with latency)
+        #determine if it's time for us to start tx'ing, start process
+        #10 * self.post_guard before our slot actually begins (deal with latency)
         if self.time_update > self.time_tune_start:
             self.antenna_start = self.interval_start + self.pre_guard
+
             self.hop()
-            if self.hops_to_beacon == 0:
-                if self.own_adr == 1:
-                    self.send_beacon()
-                else:
-                    print "Would send beacon!"
-            #   self.send_beacon() -> wie get_cts (mit sensing)
-            #       --> setzt next_beacon_slot eins/zufaellig hoeher wenn Kanal
-            #       belegt!
-            elif self.got_cts:  # TODO: NUR DEBUG -> NEGIEREN!!!
+
+            if self.got_cts:
                 self.got_cts = False
-                self.tx_data()   # do more than this?
-            #else:
-                #self.get_cts()
-                # TODO: Wait random no of slots if no CTS received!
+                self.tx_data()
+                self.hops_to_beacon += 1
+
+            elif self.got_rts:
+                self.send_cts()
+                self.got_rts = False
+                self.hops_to_beacon += 1
+
+            elif self.hops_to_beacon == 0:
+                self.send_beacon()
+
+            elif not self.waiting_for_cts:
+                if not self.queue.empty():
+                    self.get_cts()
+                    self.waiting_for_cts = True
+                    self.hops_to_retx = self.retx_no * self.max_hops_to_retx
+                else:
+                    pass
+
+            else:
+                # Waiting for CTS - Set random time to retransmit RTS!
+                if self.hops_to_retx == 0:
+                    self.get_cts()
+                    self.retx_no += 1
+                    self.hops_to_retx = random.randint((self.retx_no - 1) * self.max_hops_to_retx, self.retx_no * self.max_hops_to_retx)
+                self.hops_to_retx -= 1
+
             self.interval_start += self.hop_interval
-            self.time_tune_start = self.interval_start - (20 * self.post_guard)
+            self.time_tune_start = self.interval_start - (10 * self.post_guard)
+
             #print "Next Hop: ", int(math.floor(self.interval_start)), " - ", self.interval_start % 1, " ----- INDEX: ", self.hop_index
+
             self.hops_to_beacon -= 1
 
         return ninput_items
