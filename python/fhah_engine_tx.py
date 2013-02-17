@@ -117,7 +117,7 @@ class fhah_engine_tx(gr.block):
         self.rx_hop_index = 0
         self.consecutive_miss = 0
 
-        self.max_hops_to_beacon = 100
+        self.max_hops_to_beacon = 50
         self.hops_to_beacon = 100
         self.diff_last_beacon = 0
         self.beacon_msg = numpy.ones((1, 5), dtype='uint8')[0]
@@ -126,6 +126,10 @@ class fhah_engine_tx(gr.block):
 
         self.time_tune_start = 0
 
+        self.max_neighbors = len(self.tx_freq_list)
+        self.neighbors = [False] * self.max_neighbors
+        self.discovery_finished = False
+
         self.rts_msg = numpy.array([0, 0, 1, 0, 0], dtype='uint8')[0]
         self.got_cts = False
         self.waiting_for_cts = False
@@ -133,13 +137,11 @@ class fhah_engine_tx(gr.block):
         self.max_hops_to_retx = 10
         self.retx_no = 1
         self.got_rts = False
+        self.max_rts_tries = 10
 
-        self.own_adr = numpy.array([addr], dtype='uint8')
-        self.bcst_adr = numpy.array([0], dtype='uint8')
-        if self.own_adr == numpy.array([1], dtype='uint8'):
-            self.dst_adr = numpy.array([2], dtype='uint8')
-        else:
-            self.dst_adr = numpy.array([1], dtype='uint8')
+        self.own_adr = self.max_neighbors
+        self.bcst_adr = 0  # TODO: Set this to integers!
+        self.dst_adr = 0
 
     def _time_to_msg(self, time_obj):
         """
@@ -156,6 +158,14 @@ class fhah_engine_tx(gr.block):
         string = time_msg.tostring()
 
         return struct.unpack('d', string)
+
+    def _to_adr(self, adr):
+        """
+        Return time_obj as float.
+        """
+        adr_formatted = numpy.array([adr], dtype='uint8')
+
+        return adr_formatted
 
     def hop(self):
         """
@@ -229,8 +239,8 @@ class fhah_engine_tx(gr.block):
 
         # Create msg and add to tx_queue before calling transmit
         data = numpy.concatenate([msg_type,
-                                  self.own_adr,
-                                  dst_adr,
+                                  self._to_adr(self.own_adr),
+                                  self._to_adr(dst_adr),
                                   time_msg,
                                   next_hop_index])
         more_frames = 0
@@ -290,8 +300,8 @@ class fhah_engine_tx(gr.block):
             more_frames = frame_count - 1
             msg = self.tx_queue.get()
             data = numpy.concatenate([HAS_DATA,
-                                      self.own_adr,
-                                      self.dst_adr,
+                                      self._to_adr(self.own_adr),
+                                      self._to_adr(self.dst_adr),
                                       pmt.pmt_blob_data(msg.value)])
             #print "DATA-SEND: %s" % data
             tx_object = time_object, data, more_frames
@@ -299,8 +309,8 @@ class fhah_engine_tx(gr.block):
                           pmt.pmt_string_to_symbol('full'),
                           pmt.from_python(tx_object),
                           pmt.pmt_string_to_symbol('tdma'))
-            print " MSG POSTED!"
-            print " - Ant start:", repr(self.antenna_start), " - TO: ", self.dst_adr, " - at: ", repr(self.interval_start), " - time now: ", repr(self.time_update)
+            #print " - Ant start:", repr(self.antenna_start), " - TO: ", self.dst_adr, " - at: ", repr(self.interval_start), " - time now: ", repr(self.time_update)
+
             frame_count -= 1
 
             #old_data = []
@@ -309,8 +319,8 @@ class fhah_engine_tx(gr.block):
             while(frame_count > 0):
                 msg = self.tx_queue.get()
                 data = numpy.concatenate([HAS_DATA,
-                                          self.own_adr,
-                                          self.dst_adr,
+                                          self._to_adr(self.own_adr),
+                                          self._to_adr(self.dst_adr),
                                           pmt.pmt_blob_data(msg.value)])
                 blob = self.mgr.acquire(True)  # block
                 pmt.pmt_blob_resize(blob, len(data))
@@ -342,7 +352,14 @@ class fhah_engine_tx(gr.block):
                 return -1
 
             if msg.offset == OUTGOING_PKT_PORT:
-                self.queue.put(msg)  # if outgoing, put in queue for processing
+                dst = int(pmt.pmt_blob_data(msg.value).tostring()[0])
+                if dst > self.max_neighbors:
+                    print "ERROR: DST-adr > number of channels!"
+                elif self.neighbors[dst - 1] and dst != self.own_adr:
+                    self.dst_adr = dst
+                    self.queue.put(msg)  # if outgoing, put in queue for processing
+                else:
+                    print "ERROR: DST Node not in known neighborhood or own adr!"
 
             elif msg.offset == INCOMING_PKT_PORT:
                 pkt = pmt.pmt_blob_data(msg.value)
@@ -360,6 +377,7 @@ class fhah_engine_tx(gr.block):
                     elif pkt[0] == IS_RTS:
                         print "RTS received"
                         # TODO: Check own queues, if transmission is running
+                        self.dst_adr = int(pkt[1])
                         self.got_rts = True
                     elif pkt[0] == IS_CTS:
                         print "CTS received"
@@ -370,7 +388,11 @@ class fhah_engine_tx(gr.block):
                             self.retx_no = 1
                     elif pkt[0] == IS_BCN:
                         # Sync to beacon if pkt is from node with higher prio!
-                        if (pkt[1] < self.own_adr):  # and not self.synced:
+                        # TODO: Add Node to neighborhood table
+                        bcn_src = int(pkt[1])
+                        self.neighbors[bcn_src - 1] = True
+                        print "Node", bcn_src, "detected!"
+                        if (pkt[1] < self.own_adr) and self.discovery_finished:  # and not self.synced:
                             self.time_tune_start = self._msg_to_time(pkt[3:11])[0] + (2 * self.hop_interval)
                             self.interval_start = self.time_tune_start
 
@@ -383,11 +405,11 @@ class fhah_engine_tx(gr.block):
 
                             if not self.synced:
                                 print "SYNCED!"
-                            self.synced = True
+                                self.synced = True
                             # TODO: check if time is in future
                             #print "SYNCED to: ", int(math.floor(self.time_tune_start)), " - ", self.time_tune_start % 1, "--- TIME NOW: ", int(math.floor(self.time_update)), " - ", self.time_update % 1
 
-                        #elif pkt[1] > self.own_adr:
+                        #else:
                         #    print "Not syncing to higher device address!"
                     else:
                         print "ERROR: Wrong Type!"
@@ -431,12 +453,25 @@ class fhah_engine_tx(gr.block):
             if self.own_adr == 1:  # TODO: ONLY FOR DEBUGGING
                 self.interval_start = self.time_update + 2
             else:
-                self.interval_start = self.time_update + 20
-            self.time_tune_start = self.interval_start - self.post_guard
+                self.interval_start = self.time_update + 30
+            self.time_tune_start = self.interval_start - (10 * self.post_guard)
 
         #determine if it's time for us to start tx'ing, start process
         #10 * self.post_guard before our slot actually begins (deal with latency)
         if self.time_update > self.time_tune_start:
+            # Check for neighbors -> get free address
+            if not self.discovery_finished:
+                self.discovery_finished = True
+                i = 0
+                while self.neighbors[i]:
+                    i += 1
+                self.own_adr = i + 1
+                print "Set own address to:", self.own_adr
+
+                if self.own_adr != 1:
+                    # Wait another 20 sec for synchronization
+                    self.time_tune_start += 20
+
             self.antenna_start = self.interval_start + self.pre_guard
 
             self.hop()
@@ -464,10 +499,22 @@ class fhah_engine_tx(gr.block):
 
             else:
                 # Waiting for CTS - Set random time to retransmit RTS!
+                # TODO: Delete message if max_num_retries reached!!!
+                # ---> self.tx_queue element loeschen
+                # set False in neighbors
                 if self.hops_to_retx == 0:
-                    self.get_cts()
+                    print "Try no.", self.retx_no
                     self.retx_no += 1
-                    self.hops_to_retx = random.randint((self.retx_no - 1) * self.max_hops_to_retx, self.retx_no * self.max_hops_to_retx)
+                    if self.retx_no > (self.max_rts_tries + 1):
+                        self.queue.get()
+                        self.neighbors[self.dst_adr - 1] = False
+                        self.waiting_for_cts = False
+                        self.hops_to_retx = 0
+                        self.retx_no = 1
+                        print "Node", self.dst_adr, "appears to be down - remove from known nodes."
+                    else:
+                        self.hops_to_retx = random.randint((self.retx_no - 1) * self.max_hops_to_retx, self.retx_no * self.max_hops_to_retx)
+                        self.get_cts()
                 self.hops_to_retx -= 1
 
             self.interval_start += self.hop_interval
