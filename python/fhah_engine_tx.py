@@ -161,11 +161,20 @@ class fhah_engine_tx(gr.block):
 
     def _to_adr(self, adr):
         """
-        Return time_obj as float.
+        Return adr_obj - integer adr as numpy Array.
         """
         adr_formatted = numpy.array([adr], dtype='uint8')
 
         return adr_formatted
+
+    def _shift_freq_list(self, n):
+        """
+        Shift the list of frequencies - used to realize different hop sets.
+        """
+        for i in range(n):
+            freq_tmp = self.tx_freq_list.pop(0)
+            self.tx_freq_list.append(freq_tmp)
+        # TODO: shift n -> shift back max_channels - n
 
     def hop(self):
         """
@@ -274,6 +283,7 @@ class fhah_engine_tx(gr.block):
 
         #fill outgoing queue until empty or maximum bytes queued for slot
         while(not self.queue.empty()):
+            # TODO: Only one message in slot (rts, cts)
             msg = self.queue.get()
             length = len(pmt.pmt_blob_data(msg.value)) + self.overhead
             total_byte_count += length
@@ -390,14 +400,21 @@ class fhah_engine_tx(gr.block):
                         # Sync to beacon if pkt is from node with higher prio!
                         # TODO: Add Node to neighborhood table
                         bcn_src = int(pkt[1])
-                        self.neighbors[bcn_src - 1] = True
-                        print "Node", bcn_src, "detected!"
+                        if not self.neighbors[bcn_src - 1]:
+                            self.neighbors[bcn_src - 1] = True
+                            print "Node", bcn_src, "detected!"
                         if (pkt[1] < self.own_adr) and self.discovery_finished:  # and not self.synced:
-                            self.time_tune_start = self._msg_to_time(pkt[3:11])[0] + (2 * self.hop_interval)
-                            self.interval_start = self.time_tune_start
+                            self.interval_start = self._msg_to_time(pkt[3:11])[0] + (2 * self.hop_interval)
+                            #self.interval_start = self.time_update + (2 * self.hop_interval)
+
+                            # TODO: This is for DEBUGGING ONLY!
+                            if self.interval_start > (self.time_update + 1):
+                                self.interval_start += 1
+                            if self.interval_start < (self.time_update - 1):
+                                self.interval_start -= 1
 
                             # Send tune command before the USRP has to tune
-                            self.time_tune_start -= 10 * self.post_guard
+                            self.time_tune_start = self.interval_start - (10 * self.post_guard)
 
                             self.hop_index = (pkt[11] + 1) % self.tx_freq_list_length
                             if self.hops_to_beacon != 0:
@@ -406,8 +423,8 @@ class fhah_engine_tx(gr.block):
                             if not self.synced:
                                 print "SYNCED!"
                                 self.synced = True
+                                print "SYNCED to: ", int(math.floor(self.time_tune_start)), " - ", self.time_tune_start % 1, "--- TIME NOW: ", int(math.floor(self.time_update)), " - ", self.time_update % 1
                             # TODO: check if time is in future
-                            #print "SYNCED to: ", int(math.floor(self.time_tune_start)), " - ", self.time_tune_start % 1, "--- TIME NOW: ", int(math.floor(self.time_update)), " - ", self.time_update % 1
 
                         #else:
                         #    print "Not syncing to higher device address!"
@@ -436,6 +453,7 @@ class fhah_engine_tx(gr.block):
                     self.current_integer, self.current_fractional = pmt.to_python(tag.value)
                     self.time_update = self.current_integer + self.current_fractional
                     self.found_time = True
+                    print repr(self.time_update)
                 elif key_string == "rx_rate":
                     self.rate = pmt.to_python(tag.value)
                     self.sample_period = 1 / self.rate
@@ -470,58 +488,60 @@ class fhah_engine_tx(gr.block):
 
                 if self.own_adr != 1:
                     # Wait another 20 sec for synchronization
-                    self.time_tune_start += 20
-
-            self.antenna_start = self.interval_start + self.pre_guard
-
-            self.hop()
-
-            if self.got_cts:
-                self.got_cts = False
-                self.tx_data()
-                self.hops_to_beacon += 1
-
-            elif self.got_rts:
-                self.send_cts()
-                self.got_rts = False
-                self.hops_to_beacon += 1
-
-            elif self.hops_to_beacon == 0:
-                self.send_beacon()
-
-            elif not self.waiting_for_cts:
-                if not self.queue.empty():
-                    self.get_cts()
-                    self.waiting_for_cts = True
-                    self.hops_to_retx = self.retx_no * self.max_hops_to_retx
-                else:
-                    pass
+                    print "Waiting for synchronization..."
+                    self.interval_start = self.time_update + 20
 
             else:
-                # Waiting for CTS - Set random time to retransmit RTS!
-                # TODO: Delete message if max_num_retries reached!!!
-                # ---> self.tx_queue element loeschen
-                # set False in neighbors
-                if self.hops_to_retx == 0:
-                    print "Try no.", self.retx_no
-                    self.retx_no += 1
-                    if self.retx_no > (self.max_rts_tries + 1):
-                        self.queue.get()
-                        self.neighbors[self.dst_adr - 1] = False
-                        self.waiting_for_cts = False
-                        self.hops_to_retx = 0
-                        self.retx_no = 1
-                        print "Node", self.dst_adr, "appears to be down - remove from known nodes."
-                    else:
-                        self.hops_to_retx = random.randint((self.retx_no - 1) * self.max_hops_to_retx, self.retx_no * self.max_hops_to_retx)
+                self.antenna_start = self.interval_start + self.pre_guard
+
+                self.hop()
+
+                if self.got_cts:
+                    self.got_cts = False
+                    self.tx_data()
+                    self.hops_to_beacon += 1
+
+                elif self.got_rts:
+                    self.send_cts()
+                    self.got_rts = False
+                    self.hops_to_beacon += 1
+
+                elif self.hops_to_beacon == 0:
+                    self.send_beacon()
+
+                elif not self.waiting_for_cts:
+                    if not self.queue.empty():
                         self.get_cts()
-                self.hops_to_retx -= 1
+                        self.waiting_for_cts = True
+                        self.hops_to_retx = self.retx_no * self.max_hops_to_retx
+                    else:
+                        pass
+
+                else:
+                    # Waiting for CTS - Set random time to retransmit RTS!
+                    # TODO: Delete message if max_num_retries reached!!!
+                    # ---> self.tx_queue element loeschen
+                    # set False in neighbors
+                    if self.hops_to_retx == 0:
+                        print "Try no.", self.retx_no
+                        self.retx_no += 1
+                        if self.retx_no > (self.max_rts_tries + 1):
+                            self.queue.get()
+                            self.neighbors[self.dst_adr - 1] = False
+                            self.waiting_for_cts = False
+                            self.hops_to_retx = 0
+                            self.retx_no = 1
+                            print "Node", self.dst_adr, "appears to be down - remove from known nodes."
+                        else:
+                            self.hops_to_retx = random.randint((self.retx_no - 1) * self.max_hops_to_retx, self.retx_no * self.max_hops_to_retx)
+                            self.get_cts()
+                    self.hops_to_retx -= 1
+
+                self.hops_to_beacon -= 1
 
             self.interval_start += self.hop_interval
             self.time_tune_start = self.interval_start - (10 * self.post_guard)
 
             #print "Next Hop: ", int(math.floor(self.interval_start)), " - ", self.interval_start % 1, " ----- INDEX: ", self.hop_index
-
-            self.hops_to_beacon -= 1
 
         return ninput_items
