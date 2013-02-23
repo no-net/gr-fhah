@@ -133,6 +133,7 @@ class fhah_engine_tx(gr.block):
         self.rts_msg = numpy.array([0, 0, 1, 0, 0], dtype='uint8')[0]
         self.got_cts = False
         self.waiting_for_cts = False
+        self.waiting_for_data = False  # TODO: Move this stuff to state machine!
         self.hops_to_retx = 0
         self.max_hops_to_retx = 10
         self.retx_no = 1
@@ -218,6 +219,8 @@ class fhah_engine_tx(gr.block):
 
         self.tx_signaling(max_delay_in_slot, IS_CTS, self.dst_adr)
 
+        self.waiting_for_data = True
+
     def send_beacon(self):
         """
         Send at least one beacon in max_hops_to_beacon.
@@ -282,7 +285,7 @@ class fhah_engine_tx(gr.block):
         # TODO: Get dst addr from MSG
 
         #fill outgoing queue until empty or maximum bytes queued for slot
-        while(not self.queue.empty()):
+        while(not self.queue.empty()):  # TODO: REMOVE THIS WHILE LOOP
             # TODO: Only one message in slot (rts, cts)
             msg = self.queue.get()
             length = len(pmt.pmt_blob_data(msg.value)) + self.overhead
@@ -312,6 +315,7 @@ class fhah_engine_tx(gr.block):
             data = numpy.concatenate([HAS_DATA,
                                       self._to_adr(self.own_adr),
                                       self._to_adr(self.dst_adr),
+                                      self._to_adr(frame_count),  # TODO: NEW!!!
                                       pmt.pmt_blob_data(msg.value)])
             #print "DATA-SEND: %s" % data
             tx_object = time_object, data, more_frames
@@ -373,7 +377,7 @@ class fhah_engine_tx(gr.block):
 
             elif msg.offset == INCOMING_PKT_PORT:
                 pkt = pmt.pmt_blob_data(msg.value)
-                print "MSG from ", pkt[1], " - to ", pkt[2], " type: ", pkt[0]
+                #print "MSG from ", pkt[1], " - to ", pkt[2], " type: ", pkt[0]
                 if pkt[1] != self.own_adr and pkt[2] in [self.own_adr, self.bcst_adr]:
                     if pkt[0] == HAS_DATA:
                         print "DATA received"
@@ -396,7 +400,7 @@ class fhah_engine_tx(gr.block):
                             self.waiting_for_cts = False
                             self.hops_to_retx = 0
                             self.retx_no = 1
-                    elif pkt[0] == IS_BCN:
+                    elif pkt[0] == IS_BCN:  # TODO: REPLACE BY DICT!!!
                         # Sync to beacon if pkt is from node with higher prio!
                         # TODO: Add Node to neighborhood table
                         bcn_src = int(pkt[1])
@@ -408,10 +412,12 @@ class fhah_engine_tx(gr.block):
                             #self.interval_start = self.time_update + (2 * self.hop_interval)
 
                             # TODO: This is for DEBUGGING ONLY!
-                            if self.interval_start > (self.time_update + 1):
+                            while self.interval_start > (self.time_update + 1) and self.interval_start < (self.time_update + 2):
+                                print "+++Interval-Start increased!"
                                 self.interval_start += 1
-                            if self.interval_start < (self.time_update - 1):
+                            while self.interval_start > (self.time_update - 1) and self.interval_start < (self.time_update):
                                 self.interval_start -= 1
+                                print "---Interval-Start decreased!"
 
                             # Send tune command before the USRP has to tune
                             self.time_tune_start = self.interval_start - (10 * self.post_guard)
@@ -479,6 +485,7 @@ class fhah_engine_tx(gr.block):
         if self.time_update > self.time_tune_start:
             # Check for neighbors -> get free address
             if not self.discovery_finished:
+                print "Searching for neighbors..."
                 self.discovery_finished = True
                 i = 0
                 while self.neighbors[i]:
@@ -496,6 +503,9 @@ class fhah_engine_tx(gr.block):
 
                 self.hop()
 
+                # TODO: MOve most of the following stuff before
+                # time_tune_start!
+
                 if self.got_cts:
                     self.got_cts = False
                     self.tx_data()
@@ -506,18 +516,7 @@ class fhah_engine_tx(gr.block):
                     self.got_rts = False
                     self.hops_to_beacon += 1
 
-                elif self.hops_to_beacon == 0:
-                    self.send_beacon()
-
-                elif not self.waiting_for_cts:
-                    if not self.queue.empty():
-                        self.get_cts()
-                        self.waiting_for_cts = True
-                        self.hops_to_retx = self.retx_no * self.max_hops_to_retx
-                    else:
-                        pass
-
-                else:
+                elif self.waiting_for_cts:
                     # Waiting for CTS - Set random time to retransmit RTS!
                     # TODO: Delete message if max_num_retries reached!!!
                     # ---> self.tx_queue element loeschen
@@ -536,6 +535,23 @@ class fhah_engine_tx(gr.block):
                             self.hops_to_retx = random.randint((self.retx_no - 1) * self.max_hops_to_retx, self.retx_no * self.max_hops_to_retx)
                             self.get_cts()
                     self.hops_to_retx -= 1
+
+                #TODO: elif warting for data + keine data mehr uerbe 2 sltos -> jhop=sets
+                elif self.waiting_for_data:
+                    if self.hops_since_cts == 0:
+                # TODO TODO TODO TODO TODO
+
+                elif self.hops_to_beacon <= 0:
+                    self.send_beacon()
+
+                else:
+                    # Try to send data
+                    if not self.queue.empty():
+                        self.get_cts()
+                        self.waiting_for_cts = True
+                        self.hops_to_retx = self.retx_no * self.max_hops_to_retx
+                    else:
+                        pass
 
                 self.hops_to_beacon -= 1
 
