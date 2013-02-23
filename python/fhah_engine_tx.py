@@ -268,50 +268,17 @@ class fhah_engine_tx(gr.block):
         """
         Put messages from input into tx_queue.
         """
-        #get all of the packets we want to send
-        total_byte_count = 0
-        frame_count = 0
+        #TODO: Enable multi-hop transmissions -> less overhead!
+        msg = self.queue.get()
+        msg_byte_count = len(pmt.pmt_blob_data(msg.value)) + self.overhead
+        if msg_byte_count >= self.bytes_per_slot:
+            print "ERROR: Message too long!"
 
-        #put residue from previous execution
-        if self.has_old_msg:
-            length = len(pmt.pmt_blob_data(self.old_msg.value)) + self.overhead
-            total_byte_count += length
-            self.tx_queue.put(self.old_msg)
-            frame_count += 1
-            self.has_old_msg = False
-            print 'old msg'
-
-        # TODO: Check for length IF OLD_MSG and don't get new msgs if old_msg!
-        # TODO: Get dst addr from MSG
-
-        #fill outgoing queue until empty or maximum bytes queued for slot
-        while(not self.queue.empty()):  # TODO: REMOVE THIS WHILE LOOP
-            # TODO: Only one message in slot (rts, cts)
-            msg = self.queue.get()
-            length = len(pmt.pmt_blob_data(msg.value)) + self.overhead
-            total_byte_count += length
-            if total_byte_count >= self.bytes_per_slot:
-                self.has_old_msg = True
-                self.old_msg = msg
-                self.got_cts = True
-                print 'residue'
-                continue
-            else:
-                self.has_old_msg = False
-                self.tx_queue.put(msg)
-                self.got_cts = False
-                frame_count += 1
-
-        if frame_count > 0:
-
+        else:
+            self.got_cts = False
             time_object = int(math.floor(self.antenna_start)), (self.antenna_start % 1)
+            more_frames = 0
 
-            #print frame_count,self.queue.qsize(), self.tx_queue.qsize()
-            #send first frame w tuple for tx_time and number of frames to put
-            #in slot
-            blob = self.mgr.acquire(True)  # block
-            more_frames = frame_count - 1
-            msg = self.tx_queue.get()
             data = numpy.concatenate([HAS_DATA,
                                       self._to_adr(self.own_adr),
                                       self._to_adr(self.dst_adr),
@@ -323,29 +290,6 @@ class fhah_engine_tx(gr.block):
                           pmt.pmt_string_to_symbol('full'),
                           pmt.from_python(tx_object),
                           pmt.pmt_string_to_symbol('tdma'))
-            #print " - Ant start:", repr(self.antenna_start), " - TO: ", self.dst_adr, " - at: ", repr(self.interval_start), " - time now: ", repr(self.time_update)
-
-            frame_count -= 1
-
-            #old_data = []
-            #print 'frame count: ',frame_count
-            #send remining frames, blob only
-            while(frame_count > 0):
-                msg = self.tx_queue.get()
-                data = numpy.concatenate([HAS_DATA,
-                                          self._to_adr(self.own_adr),
-                                          self._to_adr(self.dst_adr),
-                                          pmt.pmt_blob_data(msg.value)])
-                blob = self.mgr.acquire(True)  # block
-                pmt.pmt_blob_resize(blob, len(data))
-                pmt.pmt_blob_rw_data(blob)[:] = data
-                self.post_msg(TO_FRAMER_PORT,
-                              pmt.pmt_string_to_symbol('d_only'),
-                              blob,
-                              pmt.pmt_string_to_symbol('tdma'))
-                frame_count -= 1
-
-            #print total_byte_count
 
     def work(self, input_items, output_items):
 
