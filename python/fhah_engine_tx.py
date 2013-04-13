@@ -329,6 +329,10 @@ class fhah_engine_tx(gr.block):
                                       pmt.pmt_string_to_symbol('rx'),
                                       blob,
                                       pmt.pmt_string_to_symbol('fhss'))
+                        # TODO: This is demo-stuff only -> retransmit to a
+                        # known node!
+                        #print pkt[1:]
+                        #self.queue.put(msg)
 
                     elif pkt[0] == IS_RTS:
                         print "RTS received"
@@ -353,6 +357,21 @@ class fhah_engine_tx(gr.block):
                         if not self.neighbors[bcn_src - 1]:
                             self.neighbors[bcn_src - 1] = True
                             print "Node", bcn_src, "detected!"
+                            # TODO: DEMO-STUFF!
+                            known_hosts_msg = [107, 104, 58]
+                            for node in self.neighbors:
+                                if node is True:
+                                    known_hosts_msg.append(43)
+                                else:
+                                    known_hosts_msg.append(45)
+                            known_hosts_msg.append(10)
+                            blob = self.mgr.acquire(True)  # block
+                            pmt.pmt_blob_resize(blob, len(known_hosts_msg))
+                            pmt.pmt_blob_rw_data(blob)[:] = known_hosts_msg
+                            self.post_msg(APP_PORT,
+                                          pmt.pmt_string_to_symbol('rx'),
+                                          blob,
+                                          pmt.pmt_string_to_symbol('fhss'))
                         if (pkt[1] < self.own_adr) and self.discovery_finished:  # and not self.synced:
                             self.interval_start = self._msg_to_time(pkt[3:11])[0] + (2 * self.hop_interval)
                             #self.interval_start = self.time_update + (2 * self.hop_interval)
@@ -462,6 +481,7 @@ class fhah_engine_tx(gr.block):
                     self.got_rts = False
                     self.hops_to_beacon += 1
                     # shift freq_list
+                    #print "SWITCHED f list: ", int(math.floor(self.time_tune_start)), " - ", self.time_tune_start % 1, "--- TIME NOW: ", int(math.floor(self.time_update)), " - ", self.time_update % 1
                     self._shift_freq_list(self.own_adr)
 
                 elif self.waiting_for_cts:
@@ -479,6 +499,21 @@ class fhah_engine_tx(gr.block):
                             self.hops_to_retx = 0
                             self.retx_no = 1
                             print "Node", self.dst_adr, "appears to be down - remove from known nodes."
+                            # TODO: DEMO-STUFF!
+                            known_hosts_msg = [107, 104, 58]
+                            for node in self.neighbors:
+                                if node is True:
+                                    known_hosts_msg.append(43)
+                                else:
+                                    known_hosts_msg.append(45)
+                            known_hosts_msg.append(10)
+                            blob = self.mgr.acquire(True)  # block
+                            pmt.pmt_blob_resize(blob, len(known_hosts_msg))
+                            pmt.pmt_blob_rw_data(blob)[:] = known_hosts_msg
+                            self.post_msg(APP_PORT,
+                                          pmt.pmt_string_to_symbol('rx'),
+                                          blob,
+                                          pmt.pmt_string_to_symbol('fhss'))
                         else:
                             self.hops_to_retx = random.randint((self.retx_no - 1) * self.max_hops_to_retx, self.retx_no * self.max_hops_to_retx)
                             self.get_cts()
