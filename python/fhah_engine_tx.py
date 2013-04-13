@@ -373,18 +373,18 @@ class fhah_engine_tx(gr.block):
                                           blob,
                                           pmt.pmt_string_to_symbol('fhss'))
                         if (pkt[1] < self.own_adr) and self.discovery_finished:  # and not self.synced:
-                            self.interval_start = self._msg_to_time(pkt[3:11])[0] + (2 * self.hop_interval)
+                            self.interval_start = int(math.floor(self.time_update)) + (self._msg_to_time(pkt[3:11])[0] % 1) + (2 * self.hop_interval)
                             #self.interval_start = self.time_update + (2 * self.hop_interval)
                             #DEBUG print "BCN sent at", repr(self._msg_to_time(pkt[3:11])[0]), " time now", self.time_update
                             #DEBUG print "interval start", self.interval_start
 
                             # TODO: This is for DEBUGGING ONLY!
-                            while self.interval_start > (self.time_update + 1) and self.interval_start < (self.time_update + 2):
-                                print "+++Interval-Start increased!"
-                                self.interval_start += 1
-                            while self.interval_start > (self.time_update - 1) and self.interval_start < (self.time_update):
-                                self.interval_start -= 1
-                                print "---Interval-Start decreased!"
+                            #while self.interval_start > (self.time_update + 1) and self.interval_start < (self.time_update + 2):
+                            #    print "+++Interval-Start increased!"
+                            #    self.interval_start += 1
+                            #while self.interval_start > (self.time_update - 1) and self.interval_start < (self.time_update):
+                            #    self.interval_start -= 1
+                            #    print "---Interval-Start decreased!"
 
                             # Send tune command before the USRP has to tune
                             self.time_tune_start = self.interval_start - (10 * self.post_guard)
