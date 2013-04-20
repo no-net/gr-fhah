@@ -413,6 +413,7 @@ class fhah_engine_tx(gr.block):
         ninput_items = len(input_items[0])
 
         if not self.know_time:
+            print "Waiting for time..."
             #process streaming samples and tags here
 
             #read all tags associated with port 0 for items
@@ -428,7 +429,7 @@ class fhah_engine_tx(gr.block):
                     print repr(self.time_update)
                 elif key_string == "rx_rate":
                     self.rate = pmt.to_python(tag.value)
-                    self.sample_period = 1 / self.rate
+                    self.sample_period = 1.0 / self.rate
                     self.found_rate = True
 
             if self.found_time and self.found_rate:
@@ -436,6 +437,7 @@ class fhah_engine_tx(gr.block):
 
         #get/update current time
         self.time_update += (self.sample_period * ninput_items)
+        #print "DEBUG: time_update:", self.time_update, " - input_items:", ninput_items, " - samp-period", self.sample_period
 
         # Set first tuning time 20 sec in future (hope that we receive beacon
         # pkg within this time for sync -> assume that we're the only node if not)

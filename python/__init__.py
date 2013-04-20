@@ -46,7 +46,7 @@ if _RTLD_GLOBAL != 0:
 
 # import any pure python here
 from fhah_engine_tx import *
-from fhah_engine_rx import *
+from packet_framer import packet_framer
 #
 
 # ----------------------------------------------------------------

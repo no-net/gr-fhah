@@ -16,8 +16,8 @@
 # along with GNU Radio; see the file COPYING.  If not, write to
 # the Free Software Foundation, Inc., 51 Franklin Street,
 # Boston, MA 02110-1301, USA.
-
 install(FILES
     fhah_fhah_engine_tx.xml
-    fhah_fhah_engine_rx.xml DESTINATION share/gnuradio/grc/blocks
+    fhah_packet_deframer.xml
+    fhah_packet_framer.xml DESTINATION share/gnuradio/grc/blocks
 )
