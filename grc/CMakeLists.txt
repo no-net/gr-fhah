@@ -19,5 +19,6 @@
 install(FILES
     fhah_fhah_engine_tx.xml
     fhah_packet_deframer.xml
-    fhah_packet_framer.xml DESTINATION share/gnuradio/grc/blocks
+    fhah_packet_framer.xml
+    fhah_tcp.xml DESTINATION share/gnuradio/grc/blocks
 )

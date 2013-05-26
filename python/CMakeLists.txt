@@ -31,7 +31,8 @@ endif()
 GR_PYTHON_INSTALL(
     FILES
     __init__.py fhah_engine_tx.py
-    packet_framer.py DESTINATION ${GR_PYTHON_DIR}/fhah
+    packet_framer.py
+    tcp.py DESTINATION ${GR_PYTHON_DIR}/fhah
 )
 
 ########################################################################

@@ -107,7 +107,7 @@ class fhah_engine_tx(gr.block):
         self.diff_last_beacon = 0
 
         self.synced = False
-        self.discovery_time = 500 * self.hop_interval
+        self.discovery_time = 250 * self.hop_interval  # TODO TODO TODO: DEBUG - 500
         self.sync_time = 800 * self.hop_interval
 
         self.time_tune_start = 0
@@ -173,7 +173,7 @@ class fhah_engine_tx(gr.block):
         """
         Hop to next slot in frequency list.
         """
-        usrps = ['usrp_sink', 'usrp_source']
+        usrps = ['uhd_sink', 'uhd_source']
 
         for usrp in usrps:
             self.post_msg(CTRL_PORT,
@@ -285,11 +285,12 @@ class fhah_engine_tx(gr.block):
     def work(self, input_items, output_items):
 
         if self.rx_state == RX_INIT:
-            for usrp in ['usrp_source', 'usrp_sink']:
+            for usrp in ['uhd_source', 'uhd_sink']:
                 self.post_msg(CTRL_PORT,
                               pmt.pmt_string_to_symbol(usrp + '.set_center_freq'),
                               pmt.from_python(((self.freq_list[self.hop_index], ), {})),
                               pmt.pmt_string_to_symbol('fhss'))
+                #print "DEBUG: Set frequency"
 
             self.rx_state = RX_SEARCH
 
@@ -312,7 +313,7 @@ class fhah_engine_tx(gr.block):
 
             elif msg.offset == INCOMING_PKT_PORT:
                 pkt = pmt.pmt_blob_data(msg.value)
-                #print "MSG from ", pkt[1], " - to ", pkt[2], " type: ", pkt[0]
+                print "DEBUG: MSG from ", pkt[1], " - to ", pkt[2], " type: ", pkt[0]
                 if pkt[1] != self.own_adr and pkt[2] in [self.own_adr, self.bcst_adr]:
                     if pkt[0] == HAS_DATA:
                         print "DATA received"
@@ -435,122 +436,123 @@ class fhah_engine_tx(gr.block):
             if self.found_time and self.found_rate:
                 self.know_time = True
 
-        #get/update current time
-        self.time_update += (self.sample_period * ninput_items)
-        #print "DEBUG: time_update:", self.time_update, " - input_items:", ninput_items, " - samp-period", self.sample_period
+        else:
+            #get/update current time
+            self.time_update += (self.sample_period * ninput_items)
+            #print "DEBUG: time_update:", self.time_update, " - input_items:", ninput_items, " - samp-period", self.sample_period
 
-        # Set first tuning time 20 sec in future (hope that we receive beacon
-        # pkg within this time for sync -> assume that we're the only node if not)
-        if self.time_tune_start == 0:
-            print "Searching for neighbors..."
-            self.interval_start = self.time_update + self.discovery_time
-            self.time_tune_start = self.interval_start - (10 * self.post_guard)
+            # Set first tuning time 20 sec in future (hope that we receive beacon
+            # pkg within this time for sync -> assume that we're the only node if not)
+            if self.time_tune_start == 0:
+                print "Searching for neighbors..."
+                self.interval_start = self.time_update + self.discovery_time
+                self.time_tune_start = self.interval_start - (10 * self.post_guard)
 
-        #determine if it's time for us to start tx'ing, start process
-        #10 * self.post_guard before our slot actually begins (deal with latency)
-        if self.time_update > self.time_tune_start:
-            # Check for neighbors -> get free address
-            if not self.discovery_finished:
-                self.discovery_finished = True
-                i = 0
-                while self.neighbors[i]:
-                    i += 1
-                self.own_adr = i + 1
-                print "Set own address to:", self.own_adr
+            #determine if it's time for us to start tx'ing, start process
+            #10 * self.post_guard before our slot actually begins (deal with latency)
+            if self.time_update > self.time_tune_start:
+                # Check for neighbors -> get free address
+                if not self.discovery_finished:
+                    self.discovery_finished = True
+                    i = 0
+                    while self.neighbors[i]:
+                        i += 1
+                    self.own_adr = i + 1
+                    print "Set own address to:", self.own_adr
 
-                if self.own_adr != 1:
-                    # Wait another 20 sec for synchronization
-                    print "Waiting for synchronization..."
-                    self.interval_start = self.time_update + self.sync_time
-
-            else:
-                self.antenna_start = self.interval_start + self.pre_guard
-
-                self.hop()
-
-                # TODO: MOve most of the following stuff before
-                # time_tune_start!
-
-                if self.got_cts:
-                    self.got_cts = False
-                    self.tx_data()
-                    self.hops_to_beacon += 1
-                    self._shift_freq_list(self.max_neighbors - self.dst_adr)
-
-                elif self.got_rts:
-                    self.send_cts()
-                    #print "--> Time CTS sent:", repr(self.time_update)
-                    self.got_rts = False
-                    self.hops_to_beacon += 1
-                    # shift freq_list
-                    #print "SWITCHED f list: ", int(math.floor(self.time_tune_start)), " - ", self.time_tune_start % 1, "--- TIME NOW: ", int(math.floor(self.time_update)), " - ", self.time_update % 1
-                    self._shift_freq_list(self.own_adr)
-
-                elif self.waiting_for_cts:
-                    # Waiting for CTS - Set random time to retransmit RTS!
-                    # TODO: Delete message if max_num_retries reached!!!
-                    # ---> self.tx_queue element loeschen
-                    # set False in neighbors
-                    if self.hops_to_retx == 0:
-                        print "Try no.", self.retx_no
-                        self.retx_no += 1
-                        if self.retx_no > (self.max_rts_tries + 1):
-                            self.queue.get()
-                            self.neighbors[self.dst_adr - 1] = False
-                            self.waiting_for_cts = False
-                            self.hops_to_retx = 0
-                            self.retx_no = 1
-                            print "Node", self.dst_adr, "appears to be down - remove from known nodes."
-                            # TODO: DEMO-STUFF!
-                            known_hosts_msg = [107, 104, 58]
-                            for node in self.neighbors:
-                                if node is True:
-                                    known_hosts_msg.append(43)
-                                else:
-                                    known_hosts_msg.append(45)
-                            known_hosts_msg.append(10)
-                            blob = self.mgr.acquire(True)  # block
-                            pmt.pmt_blob_resize(blob, len(known_hosts_msg))
-                            pmt.pmt_blob_rw_data(blob)[:] = known_hosts_msg
-                            self.post_msg(APP_PORT,
-                                          pmt.pmt_string_to_symbol('rx'),
-                                          blob,
-                                          pmt.pmt_string_to_symbol('fhss'))
-                        else:
-                            self.hops_to_retx = random.randint((self.retx_no - 1) * self.max_hops_to_retx, self.retx_no * self.max_hops_to_retx)
-                            self.get_cts()
-                    self.hops_to_retx -= 1
-                    self.hops_to_beacon += 1
-
-                elif self.waiting_for_data:
-                    self.hops_since_cts += 1
-                    print "Hops since CTS:", self.hops_since_cts
-
-                    if self.hops_since_cts > self.max_hops_to_data:
-                        self.waiting_for_data = False
-                        self.hops_since_cts = 0
-                        #switch back to broadcast
-                        self._shift_freq_list(self.max_neighbors - self.own_adr)
-
-                    self.hops_to_beacon += 1
-
-                elif self.hops_to_beacon <= 0:
-                    self.send_beacon()
+                    if self.own_adr != 1:
+                        # Wait another 20 sec for synchronization
+                        print "Waiting for synchronization..."
+                        self.interval_start = self.time_update + self.sync_time
 
                 else:
-                    # Try to send data
-                    if not self.queue.empty():
-                        self.get_cts()
-                        self.waiting_for_cts = True
-                        self.hops_to_retx = self.retx_no * self.max_hops_to_retx
+                    self.antenna_start = self.interval_start + self.pre_guard
+
+                    self.hop()
+
+                    # TODO: MOve most of the following stuff before
+                    # time_tune_start!
+
+                    if self.got_cts:
+                        self.got_cts = False
+                        self.tx_data()
+                        self.hops_to_beacon += 1
+                        self._shift_freq_list(self.max_neighbors - self.dst_adr)
+
+                    elif self.got_rts:
+                        self.send_cts()
+                        #print "--> Time CTS sent:", repr(self.time_update)
+                        self.got_rts = False
+                        self.hops_to_beacon += 1
+                        # shift freq_list
+                        #print "SWITCHED f list: ", int(math.floor(self.time_tune_start)), " - ", self.time_tune_start % 1, "--- TIME NOW: ", int(math.floor(self.time_update)), " - ", self.time_update % 1
+                        self._shift_freq_list(self.own_adr)
+
+                    elif self.waiting_for_cts:
+                        # Waiting for CTS - Set random time to retransmit RTS!
+                        # TODO: Delete message if max_num_retries reached!!!
+                        # ---> self.tx_queue element loeschen
+                        # set False in neighbors
+                        if self.hops_to_retx == 0:
+                            print "Try no.", self.retx_no
+                            self.retx_no += 1
+                            if self.retx_no > (self.max_rts_tries + 1):
+                                self.queue.get()
+                                self.neighbors[self.dst_adr - 1] = False
+                                self.waiting_for_cts = False
+                                self.hops_to_retx = 0
+                                self.retx_no = 1
+                                print "Node", self.dst_adr, "appears to be down - remove from known nodes."
+                                # TODO: DEMO-STUFF!
+                                known_hosts_msg = [107, 104, 58]
+                                for node in self.neighbors:
+                                    if node is True:
+                                        known_hosts_msg.append(43)
+                                    else:
+                                        known_hosts_msg.append(45)
+                                known_hosts_msg.append(10)
+                                blob = self.mgr.acquire(True)  # block
+                                pmt.pmt_blob_resize(blob, len(known_hosts_msg))
+                                pmt.pmt_blob_rw_data(blob)[:] = known_hosts_msg
+                                self.post_msg(APP_PORT,
+                                            pmt.pmt_string_to_symbol('rx'),
+                                            blob,
+                                            pmt.pmt_string_to_symbol('fhss'))
+                            else:
+                                self.hops_to_retx = random.randint((self.retx_no - 1) * self.max_hops_to_retx, self.retx_no * self.max_hops_to_retx)
+                                self.get_cts()
+                        self.hops_to_retx -= 1
+                        self.hops_to_beacon += 1
+
+                    elif self.waiting_for_data:
+                        self.hops_since_cts += 1
+                        print "Hops since CTS:", self.hops_since_cts
+
+                        if self.hops_since_cts > self.max_hops_to_data:
+                            self.waiting_for_data = False
+                            self.hops_since_cts = 0
+                            #switch back to broadcast
+                            self._shift_freq_list(self.max_neighbors - self.own_adr)
+
+                        self.hops_to_beacon += 1
+
+                    elif self.hops_to_beacon <= 0:
+                        self.send_beacon()
+
                     else:
-                        pass
+                        # Try to send data
+                        if not self.queue.empty():
+                            self.get_cts()
+                            self.waiting_for_cts = True
+                            self.hops_to_retx = self.retx_no * self.max_hops_to_retx
+                        else:
+                            pass
 
-                self.hops_to_beacon -= 1
+                    self.hops_to_beacon -= 1
 
-            self.interval_start += self.hop_interval
-            self.time_tune_start = self.interval_start - (10 * self.post_guard)
+                self.interval_start += self.hop_interval
+                self.time_tune_start = self.interval_start - (10 * self.post_guard)
 
-            #print "Next Hop: ", int(math.floor(self.interval_start)), " - ", self.interval_start % 1, " ----- INDEX: ", self.hop_index
+                #print "Next Hop: ", int(math.floor(self.interval_start)), " - ", self.interval_start % 1, " ----- INDEX: ", self.hop_index
 
         return ninput_items
