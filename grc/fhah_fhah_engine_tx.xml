@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <block>
-  <name>Frequency-Hopping Ad-Hoc Tx</name>
+  <name>Frequency-Hopping Ad-Hoc Engine</name>
   <key>fhah_fhah_engine_tx</key>
   <category>FH Ad-Hoc</category>
   <import>import fhah</import>
