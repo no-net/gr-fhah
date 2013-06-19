@@ -341,9 +341,10 @@ class fhah_engine_tx(gr.block):
         #self.got_rts = True
         if self.state != IDLE:
             print "ERROR: Got RTS altough not idle"
-            self.state = IDLE
-        else:
-            self.state = GOT_RTS
+            self._shift_freq_list(self.max_neighbors - self.own_adr)
+        #    self.state = IDLE
+        #else:
+        self.state = GOT_RTS
         #self.send_cts()
 
     def received_cts(self, pkt):
