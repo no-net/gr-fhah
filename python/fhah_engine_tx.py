@@ -114,7 +114,7 @@ class fhah_engine_tx(gr.block):
         self.diff_last_beacon = 0
 
         self.synced = False
-        self.discovery_time = 300 * self.hop_interval  # TODO TODO TODO: DEBUG - 500
+        self.discovery_time = 500 * self.hop_interval  # TODO TODO TODO: DEBUG - 500
         self.sync_time = 800 * self.hop_interval
 
         self.time_tune_start = 0
@@ -341,7 +341,9 @@ class fhah_engine_tx(gr.block):
         #self.got_rts = True
         if self.state != IDLE:
             print "ERROR: Got RTS altough not idle"
-        self.state = GOT_RTS
+            self.state = IDLE
+        else:
+            self.state = GOT_RTS
         #self.send_cts()
 
     def received_cts(self, pkt):
