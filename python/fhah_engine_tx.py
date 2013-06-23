@@ -114,7 +114,7 @@ class fhah_engine_tx(gr.block):
         self.diff_last_beacon = 0
 
         self.synced = False
-        self.discovery_time = 500 * self.hop_interval  # TODO TODO TODO: DEBUG - 500
+        self.discovery_time = 500 * self.hop_interval
         self.sync_time = 800 * self.hop_interval
 
         self.time_tune_start = 0
@@ -149,6 +149,9 @@ class fhah_engine_tx(gr.block):
         if addr == 1:
             self.own_addr = 1
             self.discovery_time = 0.1  # DEBUG WINELO - was: 2
+
+        if addr == 3:
+            self.discovery_time = 1500 * self.hop_interval  # DEBUG WINELO - was: 2
 
     def _time_to_msg(self, time_obj):
         """
