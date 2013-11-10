@@ -48,6 +48,7 @@ if _RTLD_GLOBAL != 0:
 from fhah_engine_tx import *
 from packet_framer import packet_framer, packet_deframer
 from tcp import tcp_sink, tcp_source
+from burst_gate import burst_gate
 #
 
 # ----------------------------------------------------------------

@@ -27,7 +27,7 @@ from gruel import pmt
 #import gnuradio.extras  # brings in gr.block
 import Queue
 import math
-import gnuradio.extras as gr_extras
+#import gnuradio.extras as gr_extras
 
 
 BROADCAST_ADDR = 255
@@ -103,7 +103,7 @@ class fhah_engine_tx(gr.block):
         self.know_time = False
         self.found_time = False
         self.found_rate = False
-        self.set_tag_propagation_policy(gr_extras.TPP_DONT)
+        self.set_tag_propagation_policy(0)  # Set Policy TPP_DONT
 
         self.overhead = 20
 

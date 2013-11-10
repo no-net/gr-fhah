@@ -25,7 +25,7 @@ from gnuradio import gr
 from gruel import pmt
 from gnuradio.digital import packet_utils
 import gnuradio.digital as gr_digital
-import gnuradio.extras as gr_extras
+#import gnuradio.extras as gr_extras
 
 # /////////////////////////////////////////////////////////////////////////////
 #                   mod/demod with packets as i/o
