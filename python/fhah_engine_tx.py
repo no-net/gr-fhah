@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright 2013 <+YOU OR YOUR COMPANY+>.
+# Copyright 2013 Karlsruhe Institute of Technology.
 #
 # This is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
