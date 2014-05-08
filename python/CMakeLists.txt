@@ -17,10 +17,12 @@
 # the Free Software Foundation, Inc., 51 Franklin Street,
 # Boston, MA 02110-1301, USA.
 
+
 ########################################################################
 # Include python install macros
 ########################################################################
 include(GrPython)
+
 if(NOT PYTHONINTERP_FOUND)
     return()
 endif()
@@ -33,6 +35,7 @@ GR_PYTHON_INSTALL(
     __init__.py fhah_engine_tx.py
     packet_framer.py
     burst_gate.py
+    pmt_rpc.py
     tcp.py DESTINATION ${GR_PYTHON_DIR}/fhah
 )
 

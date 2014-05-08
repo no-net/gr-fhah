@@ -22,7 +22,7 @@
 import numpy
 from math import pi
 from gnuradio import gr
-from gruel import pmt
+import pmt
 from gnuradio.digital import packet_utils
 import gnuradio.digital as gr_digital
 #import gnuradio.extras as gr_extras

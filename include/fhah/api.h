@@ -22,7 +22,7 @@
 #ifndef INCLUDED_FHAH_API_H
 #define INCLUDED_FHAH_API_H
 
-#include <gruel/attributes.h>
+#include <gnuradio/attributes.h>
 
 #ifdef gnuradio_fhah_EXPORTS
 #  define FHAH_API __GR_ATTR_EXPORT

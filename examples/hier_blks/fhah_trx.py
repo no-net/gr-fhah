@@ -9,9 +9,9 @@
 from gnuradio import digital
 from gnuradio import gr
 from gnuradio import uhd
-from gnuradio.gr import firdes
+#from gnuradio.gr import firdes
 import fhah
-import gnuradio.extras as gr_extras
+#import gnuradio.extras as gr_extras
 #import precog
 import time
 
@@ -104,7 +104,7 @@ class fhah_trx(gr.hier_block2):
             log=False,
         )
         self.fhah_fhah_engine_tx_0 = fhah.fhah_engine_tx(hop_interval, pre_guard, post_guard, dev_addr, samp_rate/samp_per_sym, freq_list)
-        self.extras_pmt_rpc_0 = gr_extras.pmt_rpc(obj=self, result_msg=True)
+        self.extras_pmt_rpc_0 = fhah.pmt_rpc(obj=self, result_msg=True)
         self.burst_gate_0 = fhah.burst_gate()
 
         ##################################################

@@ -22,7 +22,7 @@ import numpy
 import random
 import struct
 from gnuradio import gr
-from gruel import pmt
+import pmt
 #from gnuradio import uhd
 #import gnuradio.extras  # brings in gr.block
 import Queue
@@ -83,9 +83,9 @@ class fhah_engine_tx(gr.block):
                           num_msg_outputs=3,
                           )
 
-        self.mgr = pmt.pmt_mgr()
+        self.mgr = pmt.mgr()
         for i in range(64):
-            self.mgr.set(pmt.pmt_make_blob(10000))
+            self.mgr.set(pmt.make_blob(10000))
 
         self.hop_interval = hop_interval
         self.post_guard = post_guard
@@ -194,17 +194,17 @@ class fhah_engine_tx(gr.block):
 
         for usrp in usrps:
             self.post_msg(CTRL_PORT,
-                          pmt.pmt_string_to_symbol(usrp + '.set_command_time'),
+                          pmt.string_to_symbol(usrp + '.set_command_time'),
                           pmt.from_python((('#!\nfrom gnuradio import uhd\narg = uhd.time_spec_t(' + repr(self.interval_start) + ')', ), {})),
-                          pmt.pmt_string_to_symbol('fhss'))
+                          pmt.string_to_symbol('fhss'))
             self.post_msg(CTRL_PORT,
-                          pmt.pmt_string_to_symbol(usrp + '.set_center_freq'),
+                          pmt.string_to_symbol(usrp + '.set_center_freq'),
                           pmt.from_python(((self.freq_list[self.hop_index], ), {})),
-                          pmt.pmt_string_to_symbol('fhss'))
+                          pmt.string_to_symbol('fhss'))
             self.post_msg(CTRL_PORT,
-                          pmt.pmt_string_to_symbol(usrp + '.clear_command_time'),
+                          pmt.string_to_symbol(usrp + '.clear_command_time'),
                           pmt.from_python(((0, ), {})),
-                          pmt.pmt_string_to_symbol('fhss'))
+                          pmt.string_to_symbol('fhss'))
         self.freq_msg = "--------Since %s at: %s" % (self.interval_start, self.freq_list[self.hop_index])
 
         self.hop_index = (self.hop_index + 1) % self.freq_list_length
@@ -274,9 +274,9 @@ class fhah_engine_tx(gr.block):
         more_frames = 0
         tx_object = time_object, data, more_frames
         self.post_msg(TO_FRAMER_PORT,
-                      pmt.pmt_string_to_symbol('full'),
+                      pmt.string_to_symbol('full'),
                       pmt.from_python(tx_object),
-                      pmt.pmt_string_to_symbol('tdma'))
+                      pmt.string_to_symbol('tdma'))
 
         #print msg_type, " - ", self.interval_start % 1, " - TO: ", dst_adr, " - at: ", repr(self.interval_start), " - time now: ", repr(self.time_update)
 
@@ -286,7 +286,7 @@ class fhah_engine_tx(gr.block):
         """
         #TODO: Enable multi-hop transmissions -> less overhead!
         msg = self.queue.get()
-        msg_byte_count = len(pmt.pmt_blob_data(msg.value)) + self.overhead
+        msg_byte_count = len(pmt.blob_data(msg.value)) + self.overhead
         if msg_byte_count >= self.bytes_per_slot:
             print "ERROR: Message too long!"
 
@@ -299,16 +299,16 @@ class fhah_engine_tx(gr.block):
             data = numpy.concatenate([HAS_DATA,
                                       self._to_byte_array(self.own_adr),
                                       self._to_byte_array(self.dst_adr),
-                                      pmt.pmt_blob_data(msg.value)])
+                                      pmt.blob_data(msg.value)])
             #print "DATA-SEND: %s" % data
             tx_object = time_object, data, more_frames
             #print "DEBUG: Sending DATA at", time_object
             #print "-----fre_list %s - hop-index %s" % (self.freq_list, self.hop_index)
             #print self.freq_msg
             self.post_msg(TO_FRAMER_PORT,
-                          pmt.pmt_string_to_symbol('full'),
+                          pmt.string_to_symbol('full'),
                           pmt.from_python(tx_object),
-                          pmt.pmt_string_to_symbol('tdma'))
+                          pmt.string_to_symbol('tdma'))
 
     def received_data(self, pkt):
         """
@@ -323,12 +323,12 @@ class fhah_engine_tx(gr.block):
         self._shift_freq_list(self.max_neighbors - self.own_adr)
 
         blob = self.mgr.acquire(True)  # block
-        pmt.pmt_blob_resize(blob, len(pkt) - 1)
-        pmt.pmt_blob_rw_data(blob)[:] = pkt[1:]
+        pmt.blob_resize(blob, len(pkt) - 1)
+        pmt.blob_rw_data(blob)[:] = pkt[1:]
         self.post_msg(APP_PORT,
-                        pmt.pmt_string_to_symbol('rx'),
+                        pmt.string_to_symbol('rx'),
                         blob,
-                        pmt.pmt_string_to_symbol('fhss'))
+                        pmt.string_to_symbol('fhss'))
         # TODO: This is demo-stuff only -> retransmit to a
         # known node!
         #print pkt[1:]
@@ -387,12 +387,12 @@ class fhah_engine_tx(gr.block):
                     known_hosts_msg.append(45)
             known_hosts_msg.append(10)
             blob = self.mgr.acquire(True)  # block
-            pmt.pmt_blob_resize(blob, len(known_hosts_msg))
-            pmt.pmt_blob_rw_data(blob)[:] = known_hosts_msg
+            pmt.blob_resize(blob, len(known_hosts_msg))
+            pmt.blob_rw_data(blob)[:] = known_hosts_msg
             self.post_msg(APP_PORT,
-                            pmt.pmt_string_to_symbol('rx'),
+                            pmt.string_to_symbol('rx'),
                             blob,
-                            pmt.pmt_string_to_symbol('fhss'))
+                            pmt.string_to_symbol('fhss'))
 
         # Synchronization
         if (pkt[1] < self.own_adr and self.discovery_finished and not self.synced):
@@ -495,12 +495,12 @@ class fhah_engine_tx(gr.block):
                         known_hosts_msg.append(45)
                 known_hosts_msg.append(10)
                 blob = self.mgr.acquire(True)  # block
-                pmt.pmt_blob_resize(blob, len(known_hosts_msg))
-                pmt.pmt_blob_rw_data(blob)[:] = known_hosts_msg
+                pmt.blob_resize(blob, len(known_hosts_msg))
+                pmt.blob_rw_data(blob)[:] = known_hosts_msg
                 self.post_msg(APP_PORT,
-                            pmt.pmt_string_to_symbol('rx'),
+                            pmt.string_to_symbol('rx'),
                             blob,
-                            pmt.pmt_string_to_symbol('fhss'))
+                            pmt.string_to_symbol('fhss'))
             else:
                 self.hops_to_retx = random.randint((self.retx_no - 1) * self.max_hops_to_retx, self.retx_no * self.max_hops_to_retx)
                 self.get_cts()
@@ -529,9 +529,9 @@ class fhah_engine_tx(gr.block):
         if self.rx_state == RX_INIT:
             for usrp in ['uhd_source', 'uhd_sink']:
                 self.post_msg(CTRL_PORT,
-                              pmt.pmt_string_to_symbol(usrp + '.set_center_freq'),
+                              pmt.string_to_symbol(usrp + '.set_center_freq'),
                               pmt.from_python(((self.freq_list[self.hop_index], ), {})),
-                              pmt.pmt_string_to_symbol('fhss'))
+                              pmt.string_to_symbol('fhss'))
                 #print "DEBUG: Set frequency"
 
             self.rx_state = RX_SEARCH
@@ -545,7 +545,7 @@ class fhah_engine_tx(gr.block):
 
             # Check for pkts from higher layer (pkts to transmit)
             if msg.offset == OUTGOING_PKT_PORT:
-                dst = int(pmt.pmt_blob_data(msg.value).tostring()[0])
+                dst = int(pmt.blob_data(msg.value).tostring()[0])
                 if dst > self.max_neighbors:
                     print "ERROR: DST-adr > number of channels!"
                 elif self.neighbors[dst - 1] and dst != self.own_adr:
@@ -556,7 +556,7 @@ class fhah_engine_tx(gr.block):
 
             # Check for received pkts from deframer
             elif msg.offset == INCOMING_PKT_PORT:
-                pkt = pmt.pmt_blob_data(msg.value)
+                pkt = pmt.blob_data(msg.value)
                 pkt_type, pkt_src, pkt_dst = pkt[0:3]
 
                 handle_pkts = {HAS_DATA[0]: self.received_data,
@@ -585,7 +585,7 @@ class fhah_engine_tx(gr.block):
 
             #find all of our tags, making the adjustments to our timing
             for tag in tags:
-                key_string = pmt.pmt_symbol_to_string(tag.key)
+                key_string = pmt.symbol_to_string(tag.key)
                 if key_string == "rx_time":
                     self.current_integer, self.current_fractional = pmt.to_python(tag.value)
                     self.time_update = self.current_integer + self.current_fractional

@@ -9,9 +9,10 @@ import os
 from gnuradio import eng_notation
 from gnuradio import gr
 from gnuradio.eng_option import eng_option
-from gnuradio.gr import firdes
+from gnuradio import blocks
+#from gnuradio.gr import firdes
 from optparse import OptionParser
-import gnuradio.extras as gr_extras
+#import gnuradio.extras as gr_extras
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 execfile(script_dir + "/hier_blks/fhah_trx.py")
@@ -73,7 +74,8 @@ class simple_trx(gr.top_block):
 			post_guard=post_guard,
 			dev_addr=dev_addr,
 		)
-		self.extras_socket_msg_0_0 = gr_extras.socket_msg("TCP", "127.0.0.1", port, 0)
+		#self.extras_socket_msg_0_0 = gr_extras.socket_msg("TCP", "127.0.0.1", port, 0)
+		self.extras_socket_msg_0_0 = blocks.socket_pdu("TCP_SERVER", "", "52001", 10000)
 
 		##################################################
 		# Connections
